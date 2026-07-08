@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", serif;
+  --font-body: "Manrope", sans-serif;
+
+  --color-ink: #0F1720;
+  --color-cream: #FFFFFF;
+  --color-green-950: #0B1220;
+  --color-green-900: #101A2C;
+  --color-green-800: #16233A;
+  --color-green-700: #0EA5E9;
+  --color-gold-600: #0284C7;
+  --color-gold-500: #38BDF8;
+  --color-gold-400: #7DD3FC;
+  --color-gold-300: #BAE6FD;
+  --color-line: #E5E7EB;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+::selection {
+  background: var(--color-gold-300);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd2db;
+}
