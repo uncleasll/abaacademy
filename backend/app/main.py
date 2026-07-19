@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import date
+import csv
+import io
 import os
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
@@ -373,6 +376,90 @@ def queue_reminder(payload: dict, user=Depends(require_roles("IT Admin", "Financ
 def prepare_export(payload: dict, user=Depends(require_roles("IT Admin", "Finance"))):
     audit("export.prepared", {**payload, "actorId": user["id"]})
     return {"ready": True}
+
+
+def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingResponse:
+    output = io.StringIO()
+    fieldnames = list(rows[0].keys()) if rows else ["message"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows or [{"message": "No records found"}])
+    stream = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    return StreamingResponse(
+        stream,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/finance/export")
+def finance_export(user=Depends(require_roles("IT Admin", "Finance"))):
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT name, parent_name, parent_phone, address, klass, teacher,
+                   tuition_status, amount_due, attendance_pct
+            FROM students
+            WHERE tuition_status IN ('unpaid', 'overdue') OR amount_due > 0
+            ORDER BY amount_due DESC, name
+            """
+        ).fetchall()
+    report_rows = [
+        {
+            "student": row["name"],
+            "parent": row["parent_name"],
+            "phone": row["parent_phone"],
+            "address": row["address"],
+            "group": row["klass"],
+            "teacher": row["teacher"],
+            "tuition_status": row["tuition_status"],
+            "amount_due_usd": row["amount_due"],
+            "attendance_percent": row["attendance_pct"],
+            "report_date": date.today().isoformat(),
+        }
+        for row in rows
+    ]
+    audit("finance.export_downloaded", {"actorId": user["id"], "rows": len(report_rows)})
+    return csv_response(f"aba-tuition-report-{date.today().isoformat()}.csv", report_rows)
+
+
+@app.get("/api/finance/receipts")
+def finance_receipts(user=Depends(require_roles("IT Admin", "Finance"))):
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT name, parent_name, parent_phone, klass, teacher
+            FROM students
+            WHERE tuition_status = 'paid'
+            ORDER BY name
+            """
+        ).fetchall()
+    receipt_rows = [
+        {
+            "student": row["name"],
+            "parent": row["parent_name"],
+            "phone": row["parent_phone"],
+            "group": row["klass"],
+            "teacher": row["teacher"],
+            "amount_paid_usd": 450,
+            "receipt_date": date.today().isoformat(),
+        }
+        for row in rows
+    ]
+    audit("finance.receipts_downloaded", {"actorId": user["id"], "rows": len(receipt_rows)})
+    return csv_response(f"aba-paid-receipts-{date.today().isoformat()}.csv", receipt_rows)
+
+
+@app.post("/api/finance/reconcile")
+def finance_reconcile(user=Depends(require_roles("IT Admin", "Finance"))):
+    with connect() as conn:
+        total_due = conn.execute("SELECT COALESCE(SUM(amount_due), 0) AS total FROM students").fetchone()["total"]
+        overdue = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'overdue'").fetchone()["count"]
+        unpaid = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'unpaid'").fetchone()["count"]
+        paid = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'paid'").fetchone()["count"]
+    result = {"totalDue": total_due, "overdue": overdue, "unpaid": unpaid, "paid": paid}
+    audit("finance.reconciled", {"actorId": user["id"], **result})
+    return result
 
 
 @app.get("/api/audit")

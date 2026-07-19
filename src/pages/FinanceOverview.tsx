@@ -39,9 +39,10 @@ function FinanceMetric({
 }
 
 export function FinanceOverview() {
-  const { students, queueReminder, prepareExport } = useAcademy();
+  const { students, queueReminder, downloadFinanceExport, downloadReceipts, reconcileFinance } = useAcademy();
   const [notice, setNotice] = useState("Finance dashboard is current for July 2026.");
   const [reminded, setReminded] = useState<string[]>([]);
+  const [workingAction, setWorkingAction] = useState<string | null>(null);
 
   const summary = useMemo(() => {
     const overdue = students.filter((student) => student.tuitionStatus === "overdue");
@@ -66,6 +67,17 @@ export function FinanceOverview() {
     setNotice(`${queue.length} payment reminders queued.`);
   };
 
+  const runAction = async (key: string, action: () => Promise<void>) => {
+    setWorkingAction(key);
+    try {
+      await action();
+    } catch {
+      setNotice("Action failed. Check the API connection and try again.");
+    } finally {
+      setWorkingAction(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -82,13 +94,16 @@ export function FinanceOverview() {
             <Bell size={16} /> Queue reminders
           </button>
           <button
-            onClick={() => {
-              void prepareExport({ type: "finance-statement", month: "2026-07" });
-              setNotice("July statement export prepared.");
-            }}
+            onClick={() =>
+              void runAction("export", async () => {
+                await downloadFinanceExport();
+                setNotice("Tuition report CSV downloaded.");
+              })
+            }
+            disabled={workingAction === "export"}
             className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm hover:border-gold-500 hover:text-gold-600"
           >
-            <Download size={16} /> Export
+            <Download size={16} /> {workingAction === "export" ? "Exporting..." : "Export"}
           </button>
         </div>
       </div>
@@ -103,7 +118,7 @@ export function FinanceOverview() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-        <section className="rounded-xl border border-line bg-white shadow-sm">
+        <section data-payment-queue className="rounded-xl border border-line bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-line px-5 py-4">
             <div>
               <h3 className="font-display text-lg text-ink">Payment queue</h3>
@@ -185,24 +200,38 @@ export function FinanceOverview() {
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
-              onClick={() => setNotice("Stripe reconciliation view opened.")}
+              onClick={() =>
+                void runAction("reconcile", async () => {
+                  const result = await reconcileFinance();
+                  setNotice(
+                    `Reconciled: ${usd.format(result.totalDue)} outstanding, ${result.overdue} overdue, ${result.unpaid} pending.`
+                  );
+                })
+              }
+              disabled={workingAction === "reconcile"}
               className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
             >
-              <CreditCard size={14} /> Reconcile
+              <CreditCard size={14} /> {workingAction === "reconcile" ? "Checking..." : "Reconcile"}
             </button>
             <button
-              onClick={() => setNotice("Receipt batch prepared for paid families.")}
+              onClick={() =>
+                void runAction("receipts", async () => {
+                  await downloadReceipts();
+                  setNotice("Paid-family receipts CSV downloaded.");
+                })
+              }
+              disabled={workingAction === "receipts"}
               className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
             >
-              <ReceiptText size={14} /> Receipts
+              <ReceiptText size={14} /> {workingAction === "receipts" ? "Preparing..." : "Receipts"}
             </button>
           </div>
 
           <button
-            onClick={() => setNotice("Detailed Tuition & Payments table is ready in the next tab.")}
+            onClick={() => document.querySelector("[data-payment-queue]")?.scrollIntoView({ behavior: "smooth" })}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
           >
-            Open payment details <ArrowUpRight size={15} />
+            Open payment queue <ArrowUpRight size={15} />
           </button>
         </section>
       </div>

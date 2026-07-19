@@ -53,6 +53,9 @@ interface AcademyStore extends BootstrapData {
   deleteMeeting: (id: string) => Promise<void>;
   queueReminder: (payload: Record<string, unknown>) => Promise<void>;
   prepareExport: (payload: Record<string, unknown>) => Promise<void>;
+  downloadFinanceExport: () => Promise<void>;
+  downloadReceipts: () => Promise<void>;
+  reconcileFinance: () => Promise<{ totalDue: number; overdue: number; unpaid: number; paid: number }>;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -98,6 +101,27 @@ async function request<T>(path: string, init?: RequestInit, authToken?: string |
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+async function downloadFile(path: string, fallbackName: string, authToken?: string | null) {
+  const token = authToken ?? localStorage.getItem(TOKEN_KEY);
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match?.[1] ?? fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function AcademyProvider({ children }: { children: ReactNode }) {
@@ -336,6 +360,40 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    const downloadFinanceExport: AcademyStore["downloadFinanceExport"] = async () => {
+      try {
+        await downloadFile("/api/finance/export", "aba-tuition-report.csv", token);
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+        throw new Error("Could not download finance export");
+      }
+    };
+
+    const downloadReceipts: AcademyStore["downloadReceipts"] = async () => {
+      try {
+        await downloadFile("/api/finance/receipts", "aba-paid-receipts.csv", token);
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+        throw new Error("Could not download receipts");
+      }
+    };
+
+    const reconcileFinance: AcademyStore["reconcileFinance"] = async () => {
+      try {
+        const result = await request<{ totalDue: number; overdue: number; unpaid: number; paid: number }>(
+          "/api/finance/reconcile",
+          { method: "POST" }
+        );
+        setApiOnline(true);
+        return result;
+      } catch {
+        setApiOnline(false);
+        throw new Error("Could not reconcile finance data");
+      }
+    };
+
     return {
       ...data,
       loading,
@@ -356,6 +414,9 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       deleteMeeting,
       queueReminder,
       prepareExport,
+      downloadFinanceExport,
+      downloadReceipts,
+      reconcileFinance,
     };
   }, [data, loading, authLoading, apiOnline, token, user]);
 
