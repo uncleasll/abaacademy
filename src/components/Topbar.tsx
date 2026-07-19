@@ -1,53 +1,51 @@
-import { ChevronDown } from "lucide-react";
+import { LogOut } from "lucide-react";
 import type { Role } from "../App";
-
-const roles: Role[] = ["IT Admin", "Finance", "Teacher", "Registration"];
+import { useAcademy } from "../data/academyStore";
 
 const roleTagline: Record<Role, string> = {
-  "IT Admin": "System and user management",
-  Finance: "Tuition and payment monitoring",
-  Teacher: "Attendance, grading and homework",
-  Registration: "Applications and assessments",
+  "IT Admin": "USA operations, access, and system health",
+  Finance: "US tuition and payment monitoring",
+  Teacher: "Attendance, grading, and homework",
+  Registration: "Admissions, assessments, and family intake",
 };
 
-export function Topbar({
-  role,
-  onChangeRole,
-}: {
-  role: Role;
-  onChangeRole: (r: Role) => void;
-}) {
+export function Topbar({ role }: { role: Role }) {
+  const { apiOnline, loading, logout, user } = useAcademy();
   return (
-    <header className="flex items-center justify-between border-b border-line bg-cream/90 px-8 py-4 backdrop-blur">
-      <div>
-        <p className="font-display text-lg text-ink">Welcome back</p>
-        <p className="text-sm text-ink/50">{roleTagline[role]}</p>
+    <header className="flex flex-col gap-3 border-b border-line bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+      <div className="min-w-0">
+        <p className="truncate text-base font-bold text-ink">ABA Academy USA</p>
+        <p className="truncate text-sm text-ink/50">{roleTagline[role]}</p>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <select
-            value={role}
-            onChange={(e) => onChangeRole(e.target.value as Role)}
-            className="appearance-none rounded-full border border-line bg-white py-2 pl-4 pr-9 text-sm font-semibold text-ink shadow-sm outline-none focus:border-gold-500"
-          >
-            {roles.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink/40"
-          />
+      <div className="flex items-center justify-between gap-3 sm:justify-end">
+        <span
+          className={`hidden rounded-lg px-2.5 py-1.5 text-xs font-semibold sm:inline-flex ${
+            apiOnline ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-400/15 text-amber-700"
+          }`}
+        >
+          {loading ? "Loading" : apiOnline ? "Live DB" : "Offline fallback"}
+        </span>
+        <div className="min-w-0 rounded-lg border border-line bg-cream px-3 py-2">
+          <p className="truncate text-xs font-bold leading-tight text-ink">{user?.name ?? role}</p>
+          <p className="truncate text-[11px] font-semibold text-ink/45">{role}</p>
         </div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-900 text-xs font-semibold text-gold-300">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-900 text-xs font-semibold text-cream">
           {role
             .split(" ")
             .map((w) => w[0])
             .join("")}
         </div>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-bold text-ink transition hover:bg-cream"
+          aria-label="Log out"
+          title="Log out"
+        >
+          <LogOut size={16} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
       </div>
     </header>
   );

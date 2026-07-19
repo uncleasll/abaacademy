@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Fraunces", serif;
+  --font-display: "Manrope", sans-serif;
   --font-body: "Manrope", sans-serif;
 
-  --color-ink: #0F1720;
-  --color-cream: #FFFFFF;
-  --color-green-950: #0B1220;
-  --color-green-900: #101A2C;
-  --color-green-800: #16233A;
+  --color-ink: #111827;
+  --color-cream: #F3F4F6;
+  --color-green-950: #0F172A;
+  --color-green-900: #111827;
+  --color-green-800: #1F2937;
   --color-green-700: #0EA5E9;
   --color-gold-600: #0284C7;
   --color-gold-500: #38BDF8;
@@ -21,14 +21,35 @@ body {
   font-family: var(--font-body);
   background: var(--color-cream);
   color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100dvh;
 }
 
 .font-display {
   font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 ::selection {
   background: var(--color-gold-300);
+}
+
+button,
+select,
+input {
+  min-height: 38px;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--color-gold-500);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {

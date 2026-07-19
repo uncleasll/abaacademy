@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Sidebar } from "./components/Sidebar";
+import { useEffect, useState } from "react";
+import { MobileNav, Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { AdminOverview } from "./pages/AdminOverview";
 import { UsersPage } from "./pages/UsersPage";
@@ -10,6 +10,8 @@ import { TeacherRoster } from "./pages/TeacherRoster";
 import { TeacherReport } from "./pages/TeacherReport";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { SchedulePage } from "./pages/SchedulePage";
+import { AcademyProvider, useAcademy } from "./data/academyStore";
+import { LoginPage } from "./pages/LoginPage";
 
 export type Role = "IT Admin" | "Finance" | "Teacher" | "Registration";
 
@@ -41,24 +43,50 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
   return null;
 }
 
-export default function App() {
-  const [role, setRole] = useState<Role>("Teacher");
-  const [tab, setTab] = useState(defaultTab["Teacher"]);
+function AuthenticatedApp() {
+  const { authLoading, isAuthenticated, user } = useAcademy();
+  const [role, setRole] = useState<Role>("IT Admin");
+  const [tab, setTab] = useState(defaultTab["IT Admin"]);
 
-  const handleRoleChange = (r: Role) => {
-    setRole(r);
-    setTab(defaultTab[r]);
-  };
+  useEffect(() => {
+    if (!user?.role) return;
+    const activeRole = user.role as Role;
+    setRole(activeRole);
+    setTab(defaultTab[activeRole]);
+  }, [user?.role]);
+
+  if (authLoading) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-cream px-4">
+        <div className="rounded-xl border border-line bg-white px-5 py-4 text-sm font-semibold text-ink shadow-sm">
+          Checking secure session...
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return <LoginPage />;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-cream">
+    <div className="flex h-dvh overflow-hidden bg-cream">
       <Sidebar role={role} active={tab} onSelect={setTab} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar role={role} onChangeRole={handleRoleChange} />
-        <main className="flex-1 overflow-y-auto px-8 py-8">
-          <PageFor role={role} tab={tab} />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Topbar role={role} />
+        <main className="flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:py-6 lg:pb-8">
+          <div className="mx-auto w-full max-w-[1500px]">
+            <PageFor role={role} tab={tab} />
+          </div>
         </main>
+        <MobileNav role={role} active={tab} onSelect={setTab} />
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AcademyProvider>
+      <AuthenticatedApp />
+    </AcademyProvider>
   );
 }

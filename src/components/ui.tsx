@@ -15,7 +15,7 @@ export function StatCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border p-5 shadow-sm transition-shadow hover:shadow-md ${
+      className={`rounded-xl border p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5 ${
         accent
           ? "bg-green-900 border-green-800 text-cream"
           : "bg-white border-line"
@@ -28,7 +28,7 @@ export function StatCard({
       >
         {label}
       </p>
-      <p className={`font-display mt-2 text-3xl ${accent ? "text-cream" : "text-ink"}`}>
+      <p className={`mt-2 text-2xl font-semibold sm:text-3xl ${accent ? "text-cream" : "text-ink"}`}>
         {value}
       </p>
       {sub && (
@@ -125,18 +125,18 @@ export function PaymentPill({ status }: { status: PaymentStatus }) {
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border border-line bg-white shadow-sm ${className}`}>{children}</div>
+    <div className={`rounded-xl border border-line bg-white shadow-sm ${className}`}>{children}</div>
   );
 }
 
 export function SectionTitle({ eyebrow, title, sub }: { eyebrow?: string; title: string; sub?: string }) {
   return (
-    <div className="mb-5">
+    <div className="mb-5 min-w-0">
       {eyebrow && (
         <p className="text-xs font-semibold uppercase tracking-widest text-gold-600 font-semibold">{eyebrow}</p>
       )}
-      <h2 className="font-display mt-1 text-2xl text-ink">{title}</h2>
-      {sub && <p className="mt-1 text-sm text-ink/55">{sub}</p>}
+      <h2 className="font-display mt-1 text-2xl leading-tight text-ink sm:text-3xl">{title}</h2>
+      {sub && <p className="mt-1 max-w-3xl text-sm leading-relaxed text-ink/55">{sub}</p>}
     </div>
   );
 }
