@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -20,14 +21,23 @@ from .security import create_token, decode_token, hash_password, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
 
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://abaacademy.vercel.app",
+]
+
+allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FRONTEND_URLS", ",".join(DEFAULT_ALLOWED_ORIGINS)).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -68,6 +68,7 @@ Backend uses:
 DATABASE_PATH=backend/academy.db
 JWT_SECRET=replace-with-a-long-random-secret
 JWT_TTL_SECONDS=43200
+FRONTEND_URLS=https://abaacademy.vercel.app,http://localhost:5173
 ```
 
 The dashboard requires login. If the backend is offline after login, the current screen keeps seeded fallback data and shows `Offline fallback` in the topbar.
