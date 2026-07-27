@@ -117,3 +117,16 @@ class MeetingCreate(BaseModel):
     day: str
     time: str
     type: str
+
+
+class AttendanceRecordPatch(BaseModel):
+    studentId: str
+    date: str
+    present: bool
+
+
+class TuitionRecordPatch(BaseModel):
+    studentId: str
+    month: str
+    status: str
+    amount: int = Field(default=0, ge=0)

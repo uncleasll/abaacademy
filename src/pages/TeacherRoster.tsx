@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Save, Search, Star } from "lucide-react";
+import { Check, CheckSquare, Save, Search, Star } from "lucide-react";
 import { AttendancePill, HwPill, SectionTitle } from "../components/ui";
 import { type AttendanceStatus, type HwStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
@@ -46,7 +46,7 @@ function TeacherMetric({
 }
 
 export function TeacherRoster() {
-  const { classGroups, students, updateStudent } = useAcademy();
+  const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord, updateStudent } = useAcademy();
   const [rows, setRows] = useState(students.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
@@ -75,6 +75,17 @@ export function TeacherRoster() {
       : "0.0";
     return { present, late, absent, completeHw, avgRating };
   }, [visibleRows]);
+
+  const recentDates = attendanceDates.slice(-5);
+  const attendanceMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.present));
+    return map;
+  }, [attendanceRecords]);
+  const dateLabel = (date: string) => {
+    const value = new Date(`${date}T00:00:00`);
+    return `${value.getMonth() + 1}/${value.getDate()}/${String(value.getFullYear()).slice(2)}`;
+  };
 
   const update = (id: string, patch: Partial<(typeof rows)[number]>) => {
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -229,11 +240,14 @@ export function TeacherRoster() {
         </div>
 
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-[960px] w-full text-left text-sm">
+          <table className="min-w-[1180px] w-full text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-cream/60 text-xs uppercase text-ink/45">
                 <th className="px-5 py-3 font-semibold">Student</th>
                 <th className="px-5 py-3 font-semibold">Attendance</th>
+                {recentDates.map((date) => (
+                  <th key={date} className="px-3 py-3 text-center font-semibold">{dateLabel(date)}</th>
+                ))}
                 <th className="px-5 py-3 font-semibold">Rating</th>
                 <th className="px-5 py-3 font-semibold">Homework</th>
                 <th className="min-w-72 px-5 py-3 font-semibold">Next assignment</th>
@@ -268,6 +282,23 @@ export function TeacherRoster() {
                       ))}
                     </div>
                   </td>
+                  {recentDates.map((date) => {
+                    const checked = attendanceMap.get(`${student.id}:${date}`) ?? false;
+                    return (
+                      <td key={date} className="px-3 py-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => void updateAttendanceRecord(student.id, date, !checked)}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                            checked ? "border-green-800 bg-green-900 text-white" : "border-ink/35 bg-white text-transparent"
+                          }`}
+                          aria-label={`${checked ? "Mark absent" : "Mark present"} ${student.name} on ${date}`}
+                        >
+                          <CheckSquare size={16} />
+                        </button>
+                      </td>
+                    );
+                  })}
                   <td className="px-5 py-4">
                     <div className="flex gap-0.5">
                       {Array.from({ length: 5 }).map((_, index) => (
@@ -307,7 +338,7 @@ export function TeacherRoster() {
               ))}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-ink/40">
+                  <td colSpan={5 + recentDates.length} className="px-5 py-12 text-center text-sm text-ink/40">
                     No students match this view.
                   </td>
                 </tr>

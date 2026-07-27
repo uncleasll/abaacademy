@@ -1,6 +1,7 @@
 export type AttendanceStatus = "present" | "late" | "absent";
 export type HwStatus = "done" | "partial" | "not_done";
 export type PaymentStatus = "paid" | "unpaid" | "overdue";
+export type MonthlyPaymentStatus = "paid" | "partial" | "unpaid" | "sponsor" | "voucher" | "absent";
 export type AppStatus = "pending" | "assessment" | "interview" | "accepted" | "rejected";
 
 export interface Student {
@@ -26,6 +27,20 @@ export interface Student {
   amountDue: number;
 }
 
+export interface AttendanceRecord {
+  studentId: string;
+  date: string;
+  present: boolean;
+}
+
+export interface TuitionRecord {
+  studentId: string;
+  month: string;
+  status: MonthlyPaymentStatus;
+  amount: number;
+  note?: string;
+}
+
 export const students: Student[] = [
   { id: "1", name: "Abdulloh Tokhirov", age: 9, parentName: "Akmal Tokhirov", parentPhone: "(646) 555-0133", address: "Brooklyn, NY 11218", klass: "Al-Bukhari", teacher: "Behzodjon", stars: 5, hw: "done", attendance: "present", nextHw: "Read pages 29-30 sixty times", attendancePct: 92, performance: 90, homeworkAvg: 88, overall: 90, status: "Excellent", rank: 8, tuitionStatus: "paid", amountDue: 0 },
   { id: "2", name: "Akhmad Eljanov", age: 8, parentName: "Nodir Eljanov", parentPhone: "(718) 555-0148", address: "Queens, NY 11373", klass: "Al-Bukhari", teacher: "Behzodjon", stars: 5, hw: "done", attendance: "present", nextHw: "Memorize Surah Al-Qadr", attendancePct: 100, performance: 91, homeworkAvg: 82, overall: 92, status: "Excellent", rank: 5, tuitionStatus: "paid", amountDue: 0 },
@@ -38,6 +53,28 @@ export const students: Student[] = [
   { id: "9", name: "Zakariyoxo'ja Azimxo'jayev", age: 8, parentName: "Azimxo'ja Azimov", parentPhone: "(732) 555-0101", address: "Edison, NJ 08817", klass: "An-Nur", teacher: "Malika", stars: 1, hw: "not_done", attendance: "absent", nextHw: "Memorize Al-Falaq and Al-Ikhlas", attendancePct: 58, performance: 53, homeworkAvg: 46, overall: 53, status: "Needs Attention", rank: 16, tuitionStatus: "overdue", amountDue: 900 },
   { id: "10", name: "Umarbek Mahmadmurodov", age: 9, parentName: "Mahmud Mahmadmurodov", parentPhone: "(516) 555-3141", address: "Long Island, NY 11550", klass: "Al-Bukhari", teacher: "Behzodjon", stars: 5, hw: "done", attendance: "present", nextHw: "Read tha, sad, and daad sixty times", attendancePct: 92, performance: 93, homeworkAvg: 92, overall: 92, status: "Excellent", rank: 4, tuitionStatus: "paid", amountDue: 0 },
 ];
+
+export const attendanceDates = ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"];
+
+export const attendanceRecords: AttendanceRecord[] = students.flatMap((student) =>
+  attendanceDates.map((date, index) => ({
+    studentId: student.id,
+    date,
+    present: student.attendance !== "absent" && index < Math.max(2, Math.round(student.attendancePct / 13)),
+  }))
+);
+
+export const tuitionMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export const tuitionRecords: TuitionRecord[] = students.flatMap((student) =>
+  tuitionMonths.map((month, index) => {
+    if (student.tuitionStatus === "paid") return { studentId: student.id, month, status: "paid", amount: index < 7 ? 200 : 0 };
+    if (student.tuitionStatus === "overdue") return { studentId: student.id, month, status: index < 7 ? "unpaid" : "unpaid", amount: 0 };
+    if (index === 2) return { studentId: student.id, month, status: "sponsor", amount: 0, note: "need sponsor" };
+    if (index < 7) return { studentId: student.id, month, status: "partial", amount: 100 };
+    return { studentId: student.id, month, status: "unpaid", amount: 0 };
+  })
+);
 
 export interface Application {
   id: string;

@@ -13,11 +13,13 @@ from fastapi.responses import StreamingResponse
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
     ApplicationCreate,
+    AttendanceRecordPatch,
     LoginRequest,
     MeetingCreate,
     StaffUserCreate,
     StatusPatch,
     StudentPatch,
+    TuitionRecordPatch,
 )
 from .seed import seed_if_empty
 from .security import create_token, decode_token, hash_password, verify_password
@@ -144,6 +146,19 @@ def meeting_row(row):
     }
 
 
+def attendance_row(row):
+    data = dict(row)
+    return {"studentId": data["student_id"], "date": data["date"], "present": bool(data["present"])}
+
+
+def tuition_row(row):
+    data = dict(row)
+    record = {"studentId": data["student_id"], "month": data["month"], "status": data["status"], "amount": data["amount"]}
+    if data.get("note"):
+        record["note"] = data["note"]
+    return record
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -227,12 +242,24 @@ def bootstrap(user=Depends(get_current_user)):
         groups = [group_row(row) for row in conn.execute("SELECT * FROM class_groups ORDER BY name").fetchall()]
         users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall()]
         meetings = [meeting_row(row) for row in conn.execute("SELECT * FROM meetings ORDER BY day, time").fetchall()]
+        attendance_records = [
+            attendance_row(row)
+            for row in conn.execute("SELECT * FROM attendance_records ORDER BY date, student_id").fetchall()
+        ]
+        tuition_records = [
+            tuition_row(row)
+            for row in conn.execute("SELECT * FROM tuition_records ORDER BY student_id, month").fetchall()
+        ]
     return {
         "students": students,
         "applications": applications,
         "classGroups": groups,
         "staffUsers": users,
         "meetings": meetings,
+        "attendanceDates": ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"],
+        "attendanceRecords": attendance_records,
+        "tuitionMonths": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        "tuitionRecords": tuition_records,
     }
 
 
@@ -259,6 +286,42 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
         row = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
     audit("student.updated", {"studentId": student_id, "updates": updates, "actorId": user["id"]})
     return student_row(row)
+
+
+@app.put("/api/attendance")
+def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(require_roles("IT Admin", "Teacher"))):
+    with connect() as conn:
+        exists = conn.execute("SELECT id FROM students WHERE id = ?", (payload.studentId,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Student not found")
+        conn.execute(
+            """
+            INSERT INTO attendance_records (student_id, date, present)
+            VALUES (?, ?, ?)
+            ON CONFLICT(student_id, date) DO UPDATE SET present = excluded.present
+            """,
+            (payload.studentId, payload.date, 1 if payload.present else 0),
+        )
+    audit("attendance.updated", {"actorId": user["id"], "studentId": payload.studentId, "date": payload.date, "present": payload.present})
+    return {"ok": True}
+
+
+@app.put("/api/tuition-records")
+def update_tuition_record(payload: TuitionRecordPatch, user=Depends(require_roles("IT Admin", "Finance"))):
+    with connect() as conn:
+        exists = conn.execute("SELECT id FROM students WHERE id = ?", (payload.studentId,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Student not found")
+        conn.execute(
+            """
+            INSERT INTO tuition_records (student_id, month, status, amount)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(student_id, month) DO UPDATE SET status = excluded.status, amount = excluded.amount
+            """,
+            (payload.studentId, payload.month, payload.status, payload.amount),
+        )
+    audit("tuition_record.updated", {"actorId": user["id"], "studentId": payload.studentId, "month": payload.month, "status": payload.status, "amount": payload.amount})
+    return {"ok": True}
 
 
 @app.post("/api/applications", status_code=201)
@@ -394,30 +457,36 @@ def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingRespo
 
 @app.get("/api/finance/export")
 def finance_export(user=Depends(require_roles("IT Admin", "Finance"))):
+    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
     with connect() as conn:
-        rows = conn.execute(
+        students = conn.execute(
             """
-            SELECT name, parent_name, parent_phone, address, klass, teacher,
-                   tuition_status, amount_due, attendance_pct
+            SELECT id, name, parent_name, parent_phone, address, klass, teacher
             FROM students
-            WHERE tuition_status IN ('unpaid', 'overdue') OR amount_due > 0
-            ORDER BY amount_due DESC, name
+            ORDER BY teacher, klass, name
             """
         ).fetchall()
+        records = conn.execute("SELECT * FROM tuition_records").fetchall()
+    record_map = {(row["student_id"], row["month"]): row for row in records}
     report_rows = [
         {
-            "student": row["name"],
-            "parent": row["parent_name"],
-            "phone": row["parent_phone"],
-            "address": row["address"],
-            "group": row["klass"],
-            "teacher": row["teacher"],
-            "tuition_status": row["tuition_status"],
-            "amount_due_usd": row["amount_due"],
-            "attendance_percent": row["attendance_pct"],
+            "teacher": student["teacher"],
+            "group": student["klass"],
+            "student": student["name"],
+            "parent": student["parent_name"],
+            "phone": student["parent_phone"],
+            "address": student["address"],
+            **{
+                month: (
+                    f"{record_map[(student['id'], month)]['status']} {record_map[(student['id'], month)]['amount']}".strip()
+                    if (student["id"], month) in record_map
+                    else "unpaid 0"
+                )
+                for month in months
+            },
             "report_date": date.today().isoformat(),
         }
-        for row in rows
+        for student in students
     ]
     audit("finance.export_downloaded", {"actorId": user["id"], "rows": len(report_rows)})
     return csv_response(f"aba-tuition-report-{date.today().isoformat()}.csv", report_rows)
@@ -453,10 +522,10 @@ def finance_receipts(user=Depends(require_roles("IT Admin", "Finance"))):
 @app.post("/api/finance/reconcile")
 def finance_reconcile(user=Depends(require_roles("IT Admin", "Finance"))):
     with connect() as conn:
-        total_due = conn.execute("SELECT COALESCE(SUM(amount_due), 0) AS total FROM students").fetchone()["total"]
-        overdue = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'overdue'").fetchone()["count"]
-        unpaid = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'unpaid'").fetchone()["count"]
-        paid = conn.execute("SELECT COUNT(*) AS count FROM students WHERE tuition_status = 'paid'").fetchone()["count"]
+        total_due = conn.execute("SELECT COUNT(*) * 200 AS total FROM tuition_records WHERE status IN ('unpaid', 'absent')").fetchone()["total"]
+        overdue = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status IN ('unpaid', 'absent')").fetchone()["count"]
+        unpaid = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status = 'partial'").fetchone()["count"]
+        paid = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status = 'paid'").fetchone()["count"]
     result = {"totalDue": total_due, "overdue": overdue, "unpaid": unpaid, "paid": paid}
     audit("finance.reconciled", {"actorId": user["id"], **result})
     return result

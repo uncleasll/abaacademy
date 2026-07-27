@@ -1,13 +1,19 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   applications as fallbackApplications,
+  attendanceDates as fallbackAttendanceDates,
+  attendanceRecords as fallbackAttendanceRecords,
   classGroups as fallbackClassGroups,
   staffUsers as fallbackStaffUsers,
   students as fallbackStudents,
+  tuitionMonths as fallbackTuitionMonths,
+  tuitionRecords as fallbackTuitionRecords,
   type Application,
+  type AttendanceRecord,
   type ClassGroup,
   type StaffUser,
   type Student,
+  type TuitionRecord,
 } from "./mockData";
 
 export interface Meeting {
@@ -24,6 +30,10 @@ interface BootstrapData {
   classGroups: ClassGroup[];
   staffUsers: StaffUser[];
   meetings: Meeting[];
+  attendanceDates: string[];
+  attendanceRecords: AttendanceRecord[];
+  tuitionMonths: string[];
+  tuitionRecords: TuitionRecord[];
 }
 
 export interface AuthUser {
@@ -45,6 +55,8 @@ interface AcademyStore extends BootstrapData {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateStudent: (id: string, patch: Partial<Student>) => Promise<Student | undefined>;
+  updateAttendanceRecord: (studentId: string, date: string, present: boolean) => Promise<void>;
+  updateTuitionRecord: (studentId: string, month: string, status: TuitionRecord["status"], amount: number) => Promise<void>;
   createApplication: (payload: Omit<Application, "id" | "submitted" | "status">) => Promise<Application>;
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
   createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser>;
@@ -67,6 +79,10 @@ const fallbackData: BootstrapData = {
   applications: fallbackApplications,
   classGroups: fallbackClassGroups,
   staffUsers: fallbackStaffUsers,
+  attendanceDates: fallbackAttendanceDates,
+  attendanceRecords: fallbackAttendanceRecords,
+  tuitionMonths: fallbackTuitionMonths,
+  tuitionRecords: fallbackTuitionRecords,
   meetings: [
     { id: "m-a2", applicantId: "a2", day: "Monday", time: "9:00 AM", type: "Assessment" },
     { id: "m-a3", applicantId: "a3", day: "Monday", time: "10:30 AM", type: "Interview" },
@@ -215,6 +231,38 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
           students: prev.students.map((student) => (student.id === id ? updated : student)),
         }));
         return updated;
+      } catch {
+        setApiOnline(false);
+      }
+    };
+
+    const updateAttendanceRecord: AcademyStore["updateAttendanceRecord"] = async (studentId, date, present) => {
+      setData((prev) => ({
+        ...prev,
+        attendanceRecords: [
+          ...prev.attendanceRecords.filter((record) => record.studentId !== studentId || record.date !== date),
+          { studentId, date, present },
+        ],
+      }));
+      try {
+        await request("/api/attendance", { method: "PUT", body: JSON.stringify({ studentId, date, present }) });
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+      }
+    };
+
+    const updateTuitionRecord: AcademyStore["updateTuitionRecord"] = async (studentId, month, status, amount) => {
+      setData((prev) => ({
+        ...prev,
+        tuitionRecords: [
+          ...prev.tuitionRecords.filter((record) => record.studentId !== studentId || record.month !== month),
+          { studentId, month, status, amount },
+        ],
+      }));
+      try {
+        await request("/api/tuition-records", { method: "PUT", body: JSON.stringify({ studentId, month, status, amount }) });
+        setApiOnline(true);
       } catch {
         setApiOnline(false);
       }
@@ -406,6 +454,8 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       updateStudent,
+      updateAttendanceRecord,
+      updateTuitionRecord,
       createApplication,
       updateApplicationStatus,
       createUser,

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Filter, Search } from "lucide-react";
+import { CheckSquare, Filter, Search } from "lucide-react";
 import { AttendancePill, PaymentPill, SectionTitle, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
 
 export function StudentsPage() {
-  const { classGroups, students } = useAcademy();
+  const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord } = useAcademy();
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
@@ -30,10 +30,21 @@ export function StudentsPage() {
     setGroupFilter("All groups");
   };
 
+  const attendanceMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.present));
+    return map;
+  }, [attendanceRecords]);
+
+  const dateLabel = (date: string) => {
+    const value = new Date(`${date}T00:00:00`);
+    return `${value.getMonth() + 1}/${value.getDate()}/${String(value.getFullYear()).slice(2)}`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <SectionTitle eyebrow="IT Admin" title="All students" sub="Filter students by teacher, group, parent, phone, or address." />
+        <SectionTitle eyebrow="IT Admin" title="Students checklist" sub="Teacher/group roster with parent contacts and attendance history like the source sheet." />
         <div className="rounded-xl border border-line bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm">
           {sorted.length} of {students.length} students
         </div>
@@ -116,37 +127,52 @@ export function StudentsPage() {
       </div>
 
       <div className="hidden overflow-x-auto rounded-xl border border-line bg-white shadow-sm md:block">
-        <table className="min-w-[980px] w-full text-left text-sm">
+        <table className="min-w-[1320px] w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-line bg-cream/60 text-xs uppercase tracking-wide text-ink/50">
+            <tr className="border-b border-line bg-green-900 text-xs uppercase tracking-wide text-cream/80">
               <th className="px-5 py-3 font-semibold">#</th>
+              <th className="px-5 py-3 font-semibold">Teacher</th>
+              <th className="px-5 py-3 font-semibold">Group</th>
               <th className="px-5 py-3 font-semibold">Student</th>
               <th className="px-5 py-3 font-semibold">Parent</th>
-              <th className="px-5 py-3 font-semibold">Class</th>
-              <th className="px-5 py-3 font-semibold">Teacher</th>
-              <th className="px-5 py-3 font-semibold">Attendance</th>
-              <th className="px-5 py-3 font-semibold">Performance</th>
-              <th className="px-5 py-3 font-semibold">Overall</th>
+              <th className="px-5 py-3 font-semibold">Phone</th>
+              {attendanceDates.map((date) => (
+                <th key={date} className="px-3 py-3 text-center font-semibold">{dateLabel(date)}</th>
+              ))}
               <th className="px-5 py-3 font-semibold">Status</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((s) => (
-              <tr key={s.id} className="border-b border-line last:border-0 transition-colors hover:bg-cream/60">
+              <tr key={s.id} className="border-b border-line last:border-0 transition-colors odd:bg-sky-50/55 even:bg-emerald-50/45 hover:bg-gold-300/20">
                 <td className="px-5 py-3.5 text-ink/40">{s.rank}</td>
+                <td className="px-5 py-3.5 font-medium text-ink/70">{s.teacher}</td>
+                <td className="px-5 py-3.5 text-ink/60">{s.klass}</td>
                 <td className="px-5 py-3.5">
                   <p className="font-medium text-ink">{s.name}</p>
                   <p className="text-xs text-ink/45">Age {s.age} · {s.address}</p>
                 </td>
                 <td className="px-5 py-3.5">
                   <p className="font-medium text-ink/75">{s.parentName}</p>
-                  <p className="text-xs text-ink/45">{s.parentPhone}</p>
                 </td>
-                <td className="px-5 py-3.5 text-ink/60">{s.klass}</td>
-                <td className="px-5 py-3.5 text-ink/60">{s.teacher}</td>
-                <td className="px-5 py-3.5 text-ink/70">{s.attendancePct}%</td>
-                <td className="px-5 py-3.5 text-ink/70">{s.performance}</td>
-                <td className="px-5 py-3.5 font-semibold text-ink">{s.overall}</td>
+                <td className="px-5 py-3.5 text-ink/60">{s.parentPhone}</td>
+                {attendanceDates.map((date) => {
+                  const checked = attendanceMap.get(`${s.id}:${date}`) ?? false;
+                  return (
+                    <td key={date} className="px-3 py-3.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => void updateAttendanceRecord(s.id, date, !checked)}
+                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                          checked ? "border-green-800 bg-green-900 text-white" : "border-ink/35 bg-white text-transparent"
+                        }`}
+                        aria-label={`${checked ? "Mark absent" : "Mark present"} ${s.name} on ${date}`}
+                      >
+                        <CheckSquare size={16} />
+                      </button>
+                    </td>
+                  );
+                })}
                 <td className="px-5 py-3.5">
                   <StatusPill status={s.status} />
                 </td>
@@ -154,7 +180,7 @@ export function StudentsPage() {
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-5 py-10 text-center text-sm text-ink/40">
+                <td colSpan={7 + attendanceDates.length} className="px-5 py-10 text-center text-sm text-ink/40">
                   No students match these filters.
                 </td>
               </tr>

@@ -17,6 +17,9 @@ STUDENTS = [
     ("10", "Umarbek Mahmadmurodov", 9, "Mahmud Mahmadmurodov", "(516) 555-3141", "Long Island, NY 11550", "Al-Bukhari", "Behzodjon", 5, "done", "present", "Read tha, sad, and daad sixty times", 92, 93, 92, 92, "Excellent", 4, "paid", 0),
 ]
 
+ATTENDANCE_DATES = ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"]
+TUITION_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
 APPLICATIONS = [
     ("a1", "Sardorbek Yusupov", 8, "Farrukh", "Yusupov", "(646) 555-4567", "Brooklyn, NY 11219", "Full-Time Hifz", "Behzodjon", "Al-Bukhari", "2026-06-28", "pending"),
     ("a2", "Muhammadyusuf Karimov", 9, "Dilshod", "Karimov", "(718) 555-7890", "Queens, NY 11375", "Full-Time Hifz", "Sardor", "Al-Furqan", "2026-06-25", "assessment"),
@@ -68,6 +71,31 @@ def seed_if_empty() -> None:
         )
         count = conn.execute("SELECT COUNT(*) AS count FROM students").fetchone()["count"]
         auth_count = conn.execute("SELECT COUNT(*) AS count FROM auth_accounts").fetchone()["count"]
+        attendance_count = conn.execute("SELECT COUNT(*) AS count FROM attendance_records").fetchone()["count"]
+        if count and not attendance_count:
+            student_rows = conn.execute("SELECT id, attendance, attendance_pct, tuition_status FROM students").fetchall()
+            for student in student_rows:
+                for index, day in enumerate(ATTENDANCE_DATES):
+                    present = student["attendance"] != "absent" and index < max(2, round(student["attendance_pct"] / 13))
+                    conn.execute(
+                        "INSERT OR IGNORE INTO attendance_records VALUES (?, ?, ?)",
+                        (student["id"], day, 1 if present else 0),
+                    )
+                for index, month in enumerate(TUITION_MONTHS):
+                    if student["tuition_status"] == "paid":
+                        status, amount, note = ("paid", 200 if index < 7 else 0, "")
+                    elif student["tuition_status"] == "overdue":
+                        status, amount, note = ("unpaid", 0, "")
+                    elif index == 2:
+                        status, amount, note = ("sponsor", 0, "need sponsor")
+                    elif index < 7:
+                        status, amount, note = ("partial", 100, "")
+                    else:
+                        status, amount, note = ("unpaid", 0, "")
+                    conn.execute(
+                        "INSERT OR IGNORE INTO tuition_records VALUES (?, ?, ?, ?, ?)",
+                        (student["id"], month, status, amount, note),
+                    )
         if auth_count:
             return
         if count:
@@ -108,3 +136,23 @@ def seed_if_empty() -> None:
                 ("m-a3", "a3", "Monday", "10:30 AM", "Interview"),
             ],
         )
+        for student in STUDENTS:
+            student_id = student[0]
+            attendance = student[10]
+            attendance_pct = student[12]
+            tuition_status = student[18]
+            for index, day in enumerate(ATTENDANCE_DATES):
+                present = attendance != "absent" and index < max(2, round(attendance_pct / 13))
+                conn.execute("INSERT INTO attendance_records VALUES (?, ?, ?)", (student_id, day, 1 if present else 0))
+            for index, month in enumerate(TUITION_MONTHS):
+                if tuition_status == "paid":
+                    status, amount, note = ("paid", 200 if index < 7 else 0, "")
+                elif tuition_status == "overdue":
+                    status, amount, note = ("unpaid", 0, "")
+                elif index == 2:
+                    status, amount, note = ("sponsor", 0, "need sponsor")
+                elif index < 7:
+                    status, amount, note = ("partial", 100, "")
+                else:
+                    status, amount, note = ("unpaid", 0, "")
+                conn.execute("INSERT INTO tuition_records VALUES (?, ?, ?, ?, ?)", (student_id, month, status, amount, note))

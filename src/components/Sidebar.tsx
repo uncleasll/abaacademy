@@ -8,6 +8,8 @@ import {
   UserCog,
   FileCheck2,
   CalendarClock,
+  PanelLeftClose,
+  PanelLeftOpen,
   GraduationCap,
 } from "lucide-react";
 import type { Role } from "../App";
@@ -42,19 +44,39 @@ export function Sidebar({
   role,
   active,
   onSelect,
+  collapsed,
+  onToggle,
 }: {
   role: Role;
   active: string;
   onSelect: (key: string) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
   const items = navByRole[role];
   return (
-    <aside className="hidden h-screen w-72 flex-col border-r border-line bg-white text-ink lg:flex">
-      <div className="flex items-center gap-3 border-b border-line px-5 py-5">
+    <aside
+      className={`relative hidden h-screen flex-col border-r border-line bg-white text-ink transition-[width] duration-200 lg:flex ${
+        collapsed ? "w-20" : "w-72"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
+        className="group absolute right-3 top-4 z-20 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-ink text-white shadow-sm transition-colors hover:bg-green-800"
+      >
+        {collapsed ? <PanelLeftOpen size={21} strokeWidth={1.8} /> : <PanelLeftClose size={21} strokeWidth={1.8} />}
+        <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-sm bg-ink px-3 py-2 text-sm font-bold text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+          {collapsed ? "Open sidebar" : "Close sidebar"}
+        </span>
+      </button>
+
+      <div className={`flex items-center border-b border-line py-5 ${collapsed ? "justify-center px-3" : "gap-3 px-5"}`}>
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-900 text-cream">
           <GraduationCap size={19} strokeWidth={1.9} />
         </div>
-        <div className="min-w-0">
+        <div className={`min-w-0 ${collapsed ? "hidden" : "block"}`}>
           <p className="truncate text-sm font-bold leading-tight text-ink">ABA Academy</p>
           <p className="text-[11px] font-semibold uppercase tracking-widest text-ink/40">USA Operations</p>
         </div>
@@ -68,7 +90,10 @@ export function Sidebar({
             <button
               key={item.key}
               onClick={() => onSelect(item.key)}
-              className={`relative flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+              title={collapsed ? item.label : undefined}
+              className={`relative flex w-full items-center rounded-lg px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+                collapsed ? "justify-center" : "gap-3"
+              } ${
                 isActive
                   ? "bg-green-900 text-cream"
                   : "text-ink/55 hover:bg-cream hover:text-ink"
@@ -78,13 +103,13 @@ export function Sidebar({
                 <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-gold-400" />
               )}
               <Icon size={17} strokeWidth={1.75} />
-              {item.label}
+              {!collapsed && item.label}
             </button>
           );
         })}
       </nav>
 
-      <div className="border-t border-line p-4">
+      <div className={`border-t border-line p-4 ${collapsed ? "hidden" : "block"}`}>
         <div className="rounded-xl bg-cream p-3">
           <p className="text-xs font-semibold text-ink">Production workspace</p>
           <p className="mt-1 text-[11px] leading-relaxed text-ink/45">

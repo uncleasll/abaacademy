@@ -109,6 +109,24 @@ def init_db() -> None:
               FOREIGN KEY(applicant_id) REFERENCES applications(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS attendance_records (
+              student_id TEXT NOT NULL,
+              date TEXT NOT NULL,
+              present INTEGER NOT NULL,
+              PRIMARY KEY(student_id, date),
+              FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS tuition_records (
+              student_id TEXT NOT NULL,
+              month TEXT NOT NULL,
+              status TEXT NOT NULL,
+              amount INTEGER NOT NULL DEFAULT 0,
+              note TEXT NOT NULL DEFAULT '',
+              PRIMARY KEY(student_id, month),
+              FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS audit_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               event TEXT NOT NULL,

@@ -47,6 +47,7 @@ function AuthenticatedApp() {
   const { authLoading, isAuthenticated, user } = useAcademy();
   const [role, setRole] = useState<Role>("IT Admin");
   const [tab, setTab] = useState(defaultTab["IT Admin"]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (!user?.role) return;
@@ -69,7 +70,13 @@ function AuthenticatedApp() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-cream">
-      <Sidebar role={role} active={tab} onSelect={setTab} />
+      <Sidebar
+        role={role}
+        active={tab}
+        onSelect={setTab}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((value) => !value)}
+      />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar role={role} />
         <main className="flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:py-6 lg:pb-8">
