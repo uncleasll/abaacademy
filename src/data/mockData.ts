@@ -3,6 +3,8 @@ export type HwStatus = "done" | "partial" | "not_done";
 export type PaymentStatus = "paid" | "unpaid" | "overdue";
 export type MonthlyPaymentStatus = "paid" | "partial" | "unpaid" | "sponsor" | "voucher" | "absent";
 export type AppStatus = "pending" | "assessment" | "interview" | "accepted" | "rejected";
+export type EnrollmentStatus = "active" | "paused" | "terminated";
+export type QuarterKey = "Q1" | "Q2" | "Q3" | "Final";
 
 export interface Student {
   id: string;
@@ -25,12 +27,16 @@ export interface Student {
   rank: number;
   tuitionStatus: PaymentStatus;
   amountDue: number;
+  enrollmentStatus?: EnrollmentStatus;
+  financeNote?: string;
+  terminationNote?: string;
 }
 
 export interface AttendanceRecord {
   studentId: string;
   date: string;
   present: boolean;
+  note?: string;
 }
 
 export interface TuitionRecord {
@@ -50,7 +56,7 @@ export const students: Student[] = [
   { id: "6", name: "Muhammmadamin Ziyaddinov", age: 11, parentName: "Sherzod Ziyaddinov", parentPhone: "(917) 555-0166", address: "Staten Island, NY 10314", klass: "Al-Furqan", teacher: "Sardor", stars: 3, hw: "partial", attendance: "present", nextHw: "Memorize Surah Al-Baqarah", attendancePct: 91, performance: 73, homeworkAvg: 68, overall: 79, status: "Good", rank: 13, tuitionStatus: "unpaid", amountDue: 450 },
   { id: "7", name: "Khoji Akbar", age: 10, parentName: "Kamol Akbarov", parentPhone: "(201) 555-0189", address: "Clifton, NJ 07011", klass: "Al-Furqan", teacher: "Sardor", stars: 3, hw: "not_done", attendance: "absent", nextHw: "Memorize Surah Az-Zalzalah", attendancePct: 82, performance: 78, homeworkAvg: 73, overall: 78, status: "Good", rank: 14, tuitionStatus: "overdue", amountDue: 450 },
   { id: "8", name: "Azimjon Erkinov", age: 7, parentName: "Erkin Azimov", parentPhone: "(929) 555-0122", address: "Brooklyn, NY 11230", klass: "An-Nur", teacher: "Behzodjon", stars: 2, hw: "not_done", attendance: "late", nextHw: "Memorize the pillars of iman", attendancePct: 78, performance: 60, homeworkAvg: 44, overall: 62, status: "Needs Attention", rank: 15, tuitionStatus: "unpaid", amountDue: 450 },
-  { id: "9", name: "Zakariyoxo'ja Azimxo'jayev", age: 8, parentName: "Azimxo'ja Azimov", parentPhone: "(732) 555-0101", address: "Edison, NJ 08817", klass: "An-Nur", teacher: "Malika", stars: 1, hw: "not_done", attendance: "absent", nextHw: "Memorize Al-Falaq and Al-Ikhlas", attendancePct: 58, performance: 53, homeworkAvg: 46, overall: 53, status: "Needs Attention", rank: 16, tuitionStatus: "overdue", amountDue: 900 },
+  { id: "9", name: "Zakariyoxo'ja Azimxo'jayev", age: 8, parentName: "Azimxo'ja Azimov", parentPhone: "(732) 555-0101", address: "Edison, NJ 08817", klass: "An-Nur", teacher: "Malika", stars: 1, hw: "not_done", attendance: "absent", nextHw: "Memorize Al-Falaq and Al-Ikhlas", attendancePct: 58, performance: 53, homeworkAvg: 46, overall: 53, status: "Needs Attention", rank: 16, tuitionStatus: "overdue", amountDue: 900, enrollmentStatus: "terminated", financeNote: "Teacher marked terminated. Finance review needed before more invoices.", terminationNote: "Family stopped attending after repeated unexcused absences." },
   { id: "10", name: "Umarbek Mahmadmurodov", age: 9, parentName: "Mahmud Mahmadmurodov", parentPhone: "(516) 555-3141", address: "Long Island, NY 11550", klass: "Al-Bukhari", teacher: "Behzodjon", stars: 5, hw: "done", attendance: "present", nextHw: "Read tha, sad, and daad sixty times", attendancePct: 92, performance: 93, homeworkAvg: 92, overall: 92, status: "Excellent", rank: 4, tuitionStatus: "paid", amountDue: 0 },
 ];
 
@@ -64,12 +70,13 @@ export const attendanceRecords: AttendanceRecord[] = students.flatMap((student) 
   }))
 );
 
-export const tuitionMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+export const tuitionMonths = ["September", "October", "November", "December", "January", "February", "March", "April", "May", "June"];
 
 export const tuitionRecords: TuitionRecord[] = students.flatMap((student) =>
   tuitionMonths.map((month, index) => {
-    if (student.tuitionStatus === "paid") return { studentId: student.id, month, status: "paid", amount: index < 7 ? 200 : 0 };
-    if (student.tuitionStatus === "overdue") return { studentId: student.id, month, status: index < 7 ? "unpaid" : "unpaid", amount: 0 };
+    if (student.enrollmentStatus === "terminated") return { studentId: student.id, month, status: "absent", amount: 0, note: student.terminationNote };
+    if (student.tuitionStatus === "paid") return { studentId: student.id, month, status: "paid", amount: 450 };
+    if (student.tuitionStatus === "overdue") return { studentId: student.id, month, status: "unpaid", amount: 0, note: student.financeNote };
     if (index === 2) return { studentId: student.id, month, status: "sponsor", amount: 0, note: "need sponsor" };
     if (index < 7) return { studentId: student.id, month, status: "partial", amount: 100 };
     return { studentId: student.id, month, status: "unpaid", amount: 0 };
@@ -89,6 +96,24 @@ export interface Application {
   klass: string;
   submitted: string;
   status: AppStatus;
+  emergencyContact1Name?: string;
+  emergencyContact1Phone?: string;
+  emergencyContact1Relation?: string;
+  emergencyContact2Name?: string;
+  emergencyContact2Phone?: string;
+  emergencyContact2Relation?: string;
+  parentTelegram?: string;
+}
+
+export interface AssessmentRecord {
+  studentId: string;
+  quarter: QuarterKey;
+  islamicStudies: number;
+  quranReading: number;
+  tajweed: number;
+  memorization: number;
+  practical: number;
+  note: string;
 }
 
 export const applications: Application[] = [
@@ -98,6 +123,24 @@ export const applications: Application[] = [
   { id: "a4", name: "Islombek Rahimov", age: 10, parentName: "Otabek", parentSurname: "Rahimov", phone: "(347) 555-6789", address: "Brooklyn, NY 11223", program: "Full-Time Hifz", teacher: "Behzodjon", klass: "Al-Bukhari", submitted: "2026-06-15", status: "accepted" },
   { id: "a5", name: "Diyorbek Saidov", age: 8, parentName: "Aziz", parentSurname: "Saidov", phone: "(929) 555-8901", address: "Edison, NJ 08820", program: "Full-Time Hifz", teacher: "Sardor", klass: "Al-Furqan", submitted: "2026-06-10", status: "rejected" },
 ];
+
+export const assessmentCalendar = [
+  { key: "Q1" as QuarterKey, label: "Quarter 1 Assessment", window: "Late November", months: "September-November" },
+  { key: "Q2" as QuarterKey, label: "Quarter 2 Assessment", window: "Late January", months: "December-January" },
+  { key: "Q3" as QuarterKey, label: "Quarter 3 Assessment", window: "Late March", months: "February-March" },
+  { key: "Final" as QuarterKey, label: "Quarter 4 / Final Exam", window: "June", months: "April-June" },
+];
+
+export const assessmentRecords: AssessmentRecord[] = students.map((student) => ({
+  studentId: student.id,
+  quarter: "Q1",
+  islamicStudies: Math.max(50, student.performance - 4),
+  quranReading: student.performance,
+  tajweed: Math.max(50, student.performance - 6),
+  memorization: Math.max(50, student.performance - 2),
+  practical: student.overall,
+  note: student.status === "Needs Attention" ? "Needs parent follow-up before next quarter." : "On track for current level.",
+}));
 
 export interface ClassGroup {
   id: string;

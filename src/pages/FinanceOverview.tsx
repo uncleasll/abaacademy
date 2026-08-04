@@ -87,10 +87,11 @@ export function FinanceOverview() {
     const overdue = students.filter((student) => student.tuitionStatus === "overdue");
     const pending = students.filter((student) => student.tuitionStatus === "unpaid");
     const paid = students.filter((student) => student.tuitionStatus === "paid");
+    const financeFlags = students.filter((student) => student.attendance === "absent" || student.enrollmentStatus === "terminated" || student.financeNote);
     const totalDue = students.reduce((sum, student) => sum + student.amountDue, 0);
     const collectible = totalDue + paid.length * 450;
     const collectionRate = collectible ? Math.round(((paid.length * 450) / collectible) * 100) : 0;
-    return { overdue, pending, paid, totalDue, collectionRate };
+    return { overdue, pending, paid, financeFlags, totalDue, collectionRate };
   }, [students]);
 
   const queue = [...summary.overdue, ...summary.pending]
@@ -178,7 +179,7 @@ export function FinanceOverview() {
         <FinanceMetric label="Outstanding" value={usd.format(summary.totalDue)} detail={`${summary.overdue.length + summary.pending.length} families need follow-up`} icon={Wallet} tone="dark" />
         <FinanceMetric label="Collected" value={usd.format(collectedEstimate)} detail={`${summary.collectionRate}% collection rate estimate`} icon={TrendingUp} tone="good" />
         <FinanceMetric label="Overdue" value={String(summary.overdue.length)} detail="Prioritize these today" icon={Bell} tone="warn" />
-        <FinanceMetric label="Pending" value={String(summary.pending.length)} detail="Not overdue yet" icon={ReceiptText} />
+        <FinanceMetric label="Flags" value={String(summary.financeFlags.length)} detail="Absent, notes, or terminated" icon={ReceiptText} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -224,7 +225,18 @@ export function FinanceOverview() {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.teacher}</span>
                     <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.klass}</span>
+                    {student.attendance === "absent" && (
+                      <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">Absent</span>
+                    )}
+                    {student.enrollmentStatus === "terminated" && (
+                      <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white">Terminated</span>
+                    )}
                   </div>
+                  {(student.financeNote || student.terminationNote) && (
+                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                      {student.terminationNote || student.financeNote}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-baseline justify-between gap-3">
@@ -302,7 +314,7 @@ export function FinanceOverview() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-ink">Monthly tuition</p>
-                <p className="text-xs text-ink/45">$450 standard plan per active student</p>
+                <p className="text-xs text-ink/45">$450 standard plan · September-June only</p>
               </div>
             </div>
           </div>
@@ -351,7 +363,7 @@ export function FinanceOverview() {
             <h3 className="font-display text-lg text-ink">Monthly tuition matrix</h3>
             <p className="mt-0.5 text-sm text-ink/45">Green paid, yellow partial/sponsor, red unpaid. Every cell is editable.</p>
           </div>
-          <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{tuitionMonths.length} months</span>
+          <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{tuitionMonths.length} program months · July/Aug off</span>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1360px] w-full text-left text-sm">
@@ -377,13 +389,14 @@ export function FinanceOverview() {
                   <td className="px-4 py-3 text-ink/55">{student.parentPhone}</td>
                   {tuitionMonths.map((month) => {
                     const record = tuitionMap.get(`${student.id}:${month}`) ?? { status: "unpaid", amount: 0 };
+                    const effectiveStatus = student.enrollmentStatus === "terminated" ? "absent" : record.status;
                     return (
-                      <td key={month} className={`min-w-24 px-1.5 py-2 text-center ${paymentCellClass[record.status]}`}>
+                      <td key={month} className={`min-w-24 px-1.5 py-2 text-center ${paymentCellClass[effectiveStatus]}`}>
                         <select
-                          value={record.status}
+                          value={effectiveStatus}
                           onChange={(event) => {
                             const status = event.target.value as MonthlyPaymentStatus;
-                            const amount = status === "paid" ? 200 : status === "partial" ? Math.max(record.amount, 100) : 0;
+                            const amount = status === "paid" ? 450 : status === "partial" ? Math.max(record.amount, 100) : 0;
                             void updateTuitionRecord(student.id, month, status, amount);
                           }}
                           className="w-full rounded border border-black/10 bg-white/75 px-1 py-1 text-[11px] font-semibold text-ink outline-none"

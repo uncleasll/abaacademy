@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CheckSquare, Save, Search, Star } from "lucide-react";
+import { Check, CheckSquare, Save, Search, Star, UserX } from "lucide-react";
 import { AttendancePill, HwPill, SectionTitle } from "../components/ui";
 import { type AttendanceStatus, type HwStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
@@ -101,6 +101,9 @@ export function TeacherRoster() {
         stars: row.stars,
         hw: row.hw,
         nextHw: row.nextHwDraft,
+        enrollmentStatus: row.enrollmentStatus,
+        financeNote: row.financeNote,
+        terminationNote: row.terminationNote,
       });
     });
     setSaved(true);
@@ -164,6 +167,11 @@ export function TeacherRoster() {
                 <p className="mt-1 text-xs text-ink/45">
                   {student.klass} · {student.parentPhone}
                 </p>
+                {(student.enrollmentStatus === "terminated" || student.financeNote) && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700">
+                    {student.enrollmentStatus === "terminated" ? "Terminated" : "Finance note"}: {student.terminationNote || student.financeNote}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -230,6 +238,29 @@ export function TeacherRoster() {
                   className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium normal-case text-ink outline-none focus:border-gold-500"
                 />
               </label>
+              <div className="space-y-2 rounded-lg border border-line bg-cream/50 p-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    update(student.id, {
+                      enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
+                      terminationNote: student.enrollmentStatus === "terminated" ? "" : student.terminationNote || "Teacher marked terminated. Finance review needed.",
+                      financeNote: student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
+                    })
+                  }
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold ${
+                    student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "bg-white text-ink/65 hover:text-red-600"
+                  }`}
+                >
+                  <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Mark terminated"}
+                </button>
+                <textarea
+                  value={student.terminationNote ?? ""}
+                  onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
+                  placeholder="Note for finance"
+                  className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm normal-case text-ink outline-none focus:border-gold-500"
+                />
+              </div>
             </div>
           ))}
           {visibleRows.length === 0 && (
@@ -251,6 +282,7 @@ export function TeacherRoster() {
                 <th className="px-5 py-3 font-semibold">Rating</th>
                 <th className="px-5 py-3 font-semibold">Homework</th>
                 <th className="min-w-72 px-5 py-3 font-semibold">Next assignment</th>
+                <th className="min-w-72 px-5 py-3 font-semibold">Finance / enrollment note</th>
               </tr>
             </thead>
             <tbody>
@@ -333,6 +365,32 @@ export function TeacherRoster() {
                       onChange={(event) => update(student.id, { nextHwDraft: event.target.value })}
                       className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
                     />
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update(student.id, {
+                            enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
+                            terminationNote: student.enrollmentStatus === "terminated" ? "" : student.terminationNote || "Teacher marked terminated. Finance review needed.",
+                            financeNote: student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
+                          })
+                        }
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold ${
+                          student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "border border-line text-ink/55 hover:border-red-300 hover:text-red-600"
+                        }`}
+                      >
+                        <UserX size={14} />
+                        {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
+                      </button>
+                      <input
+                        value={student.terminationNote ?? student.financeNote ?? ""}
+                        onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
+                        placeholder="Optional note visible to finance"
+                        className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}

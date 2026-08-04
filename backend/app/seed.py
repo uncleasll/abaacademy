@@ -18,7 +18,7 @@ STUDENTS = [
 ]
 
 ATTENDANCE_DATES = ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"]
-TUITION_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+TUITION_MONTHS = ["September", "October", "November", "December", "January", "February", "March", "April", "May", "June"]
 
 APPLICATIONS = [
     ("a1", "Sardorbek Yusupov", 8, "Farrukh", "Yusupov", "(646) 555-4567", "Brooklyn, NY 11219", "Full-Time Hifz", "Behzodjon", "Al-Bukhari", "2026-06-28", "pending"),
@@ -78,12 +78,12 @@ def seed_if_empty() -> None:
                 for index, day in enumerate(ATTENDANCE_DATES):
                     present = student["attendance"] != "absent" and index < max(2, round(student["attendance_pct"] / 13))
                     conn.execute(
-                        "INSERT OR IGNORE INTO attendance_records VALUES (?, ?, ?)",
+                        "INSERT OR IGNORE INTO attendance_records (student_id, date, present) VALUES (?, ?, ?)",
                         (student["id"], day, 1 if present else 0),
                     )
                 for index, month in enumerate(TUITION_MONTHS):
                     if student["tuition_status"] == "paid":
-                        status, amount, note = ("paid", 200 if index < 7 else 0, "")
+                        status, amount, note = ("paid", 450, "")
                     elif student["tuition_status"] == "overdue":
                         status, amount, note = ("unpaid", 0, "")
                     elif index == 2:
@@ -108,11 +108,20 @@ def seed_if_empty() -> None:
                 )
             return
         conn.executemany(
-            "INSERT INTO students VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO students
+            (id, name, age, parent_name, parent_phone, address, klass, teacher, stars, hw, attendance,
+             next_hw, attendance_pct, performance, homework_avg, overall, status, rank, tuition_status, amount_due)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             STUDENTS,
         )
         conn.executemany(
-            "INSERT INTO applications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO applications
+            (id, name, age, parent_name, parent_surname, phone, address, program, teacher, klass, submitted, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             APPLICATIONS,
         )
         conn.executemany(
@@ -143,10 +152,13 @@ def seed_if_empty() -> None:
             tuition_status = student[18]
             for index, day in enumerate(ATTENDANCE_DATES):
                 present = attendance != "absent" and index < max(2, round(attendance_pct / 13))
-                conn.execute("INSERT INTO attendance_records VALUES (?, ?, ?)", (student_id, day, 1 if present else 0))
+                conn.execute(
+                    "INSERT INTO attendance_records (student_id, date, present) VALUES (?, ?, ?)",
+                    (student_id, day, 1 if present else 0),
+                )
             for index, month in enumerate(TUITION_MONTHS):
                 if tuition_status == "paid":
-                    status, amount, note = ("paid", 200 if index < 7 else 0, "")
+                    status, amount, note = ("paid", 450, "")
                 elif tuition_status == "overdue":
                     status, amount, note = ("unpaid", 0, "")
                 elif index == 2:

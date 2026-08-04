@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   applications as fallbackApplications,
+  assessmentRecords as fallbackAssessmentRecords,
   attendanceDates as fallbackAttendanceDates,
   attendanceRecords as fallbackAttendanceRecords,
   classGroups as fallbackClassGroups,
@@ -9,6 +10,7 @@ import {
   tuitionMonths as fallbackTuitionMonths,
   tuitionRecords as fallbackTuitionRecords,
   type Application,
+  type AssessmentRecord,
   type AttendanceRecord,
   type ClassGroup,
   type StaffUser,
@@ -34,6 +36,7 @@ interface BootstrapData {
   attendanceRecords: AttendanceRecord[];
   tuitionMonths: string[];
   tuitionRecords: TuitionRecord[];
+  assessmentRecords: AssessmentRecord[];
 }
 
 export interface AuthUser {
@@ -57,6 +60,7 @@ interface AcademyStore extends BootstrapData {
   updateStudent: (id: string, patch: Partial<Student>) => Promise<Student | undefined>;
   updateAttendanceRecord: (studentId: string, date: string, present: boolean) => Promise<void>;
   updateTuitionRecord: (studentId: string, month: string, status: TuitionRecord["status"], amount: number) => Promise<void>;
+  updateAssessmentRecord: (record: AssessmentRecord) => Promise<void>;
   createApplication: (payload: Omit<Application, "id" | "submitted" | "status">) => Promise<Application>;
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
   createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser>;
@@ -83,6 +87,7 @@ const fallbackData: BootstrapData = {
   attendanceRecords: fallbackAttendanceRecords,
   tuitionMonths: fallbackTuitionMonths,
   tuitionRecords: fallbackTuitionRecords,
+  assessmentRecords: fallbackAssessmentRecords,
   meetings: [
     { id: "m-a2", applicantId: "a2", day: "Monday", time: "9:00 AM", type: "Assessment" },
     { id: "m-a3", applicantId: "a3", day: "Monday", time: "10:30 AM", type: "Interview" },
@@ -164,8 +169,8 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     }
     setLoading(true);
     try {
-      const bootstrap = await request<BootstrapData>("/api/bootstrap", undefined, activeToken);
-      setData(bootstrap);
+      const bootstrap = await request<Partial<BootstrapData>>("/api/bootstrap", undefined, activeToken);
+      setData({ ...fallbackData, ...bootstrap });
       setApiOnline(true);
     } catch (error) {
       setData((prev) => prev);
@@ -262,6 +267,22 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       }));
       try {
         await request("/api/tuition-records", { method: "PUT", body: JSON.stringify({ studentId, month, status, amount }) });
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+      }
+    };
+
+    const updateAssessmentRecord: AcademyStore["updateAssessmentRecord"] = async (record) => {
+      setData((prev) => ({
+        ...prev,
+        assessmentRecords: [
+          ...prev.assessmentRecords.filter((item) => item.studentId !== record.studentId || item.quarter !== record.quarter),
+          record,
+        ],
+      }));
+      try {
+        await request("/api/assessments", { method: "PUT", body: JSON.stringify(record) });
         setApiOnline(true);
       } catch {
         setApiOnline(false);
@@ -456,6 +477,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       updateStudent,
       updateAttendanceRecord,
       updateTuitionRecord,
+      updateAssessmentRecord,
       createApplication,
       updateApplicationStatus,
       createUser,

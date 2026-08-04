@@ -8,6 +8,7 @@ import { FinanceOverview } from "./pages/FinanceOverview";
 import { TuitionPage } from "./pages/TuitionPage";
 import { TeacherRoster } from "./pages/TeacherRoster";
 import { TeacherReport } from "./pages/TeacherReport";
+import { AssessmentsPage } from "./pages/AssessmentsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { AcademyProvider, useAcademy } from "./data/academyStore";
@@ -34,6 +35,7 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
   }
   if (role === "Teacher") {
     if (tab === "roster") return <TeacherRoster />;
+    if (tab === "assessments") return <AssessmentsPage />;
     if (tab === "report") return <TeacherReport />;
   }
   if (role === "Registration") {

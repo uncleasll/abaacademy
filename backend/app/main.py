@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
     ApplicationCreate,
+    AssessmentRecordPatch,
     AttendanceRecordPatch,
     LoginRequest,
     MeetingCreate,
@@ -78,6 +79,9 @@ def student_row(row):
         "rank": data["rank"],
         "tuitionStatus": data["tuition_status"],
         "amountDue": data["amount_due"],
+        "enrollmentStatus": data.get("enrollment_status", "active"),
+        "financeNote": data.get("finance_note", ""),
+        "terminationNote": data.get("termination_note", ""),
     }
 
 
@@ -96,6 +100,13 @@ def application_row(row):
         "klass": data["klass"],
         "submitted": data["submitted"],
         "status": data["status"],
+        "emergencyContact1Name": data.get("emergency_contact1_name", ""),
+        "emergencyContact1Phone": data.get("emergency_contact1_phone", ""),
+        "emergencyContact1Relation": data.get("emergency_contact1_relation", ""),
+        "emergencyContact2Name": data.get("emergency_contact2_name", ""),
+        "emergencyContact2Phone": data.get("emergency_contact2_phone", ""),
+        "emergencyContact2Relation": data.get("emergency_contact2_relation", ""),
+        "parentTelegram": data.get("parent_telegram", ""),
     }
 
 
@@ -148,7 +159,10 @@ def meeting_row(row):
 
 def attendance_row(row):
     data = dict(row)
-    return {"studentId": data["student_id"], "date": data["date"], "present": bool(data["present"])}
+    record = {"studentId": data["student_id"], "date": data["date"], "present": bool(data["present"])}
+    if data.get("note"):
+        record["note"] = data["note"]
+    return record
 
 
 def tuition_row(row):
@@ -157,6 +171,20 @@ def tuition_row(row):
     if data.get("note"):
         record["note"] = data["note"]
     return record
+
+
+def assessment_row(row):
+    data = dict(row)
+    return {
+        "studentId": data["student_id"],
+        "quarter": data["quarter"],
+        "islamicStudies": data["islamic_studies"],
+        "quranReading": data["quran_reading"],
+        "tajweed": data["tajweed"],
+        "memorization": data["memorization"],
+        "practical": data["practical"],
+        "note": data["note"],
+    }
 
 
 @app.get("/health")
@@ -250,6 +278,10 @@ def bootstrap(user=Depends(get_current_user)):
             tuition_row(row)
             for row in conn.execute("SELECT * FROM tuition_records ORDER BY student_id, month").fetchall()
         ]
+        assessment_records = [
+            assessment_row(row)
+            for row in conn.execute("SELECT * FROM assessment_records ORDER BY quarter, student_id").fetchall()
+        ]
     return {
         "students": students,
         "applications": applications,
@@ -258,8 +290,9 @@ def bootstrap(user=Depends(get_current_user)):
         "meetings": meetings,
         "attendanceDates": ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"],
         "attendanceRecords": attendance_records,
-        "tuitionMonths": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        "tuitionMonths": ["September", "October", "November", "December", "January", "February", "March", "April", "May", "June"],
         "tuitionRecords": tuition_records,
+        "assessmentRecords": assessment_records,
     }
 
 
@@ -272,6 +305,9 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
         "nextHw": "next_hw",
         "tuitionStatus": "tuition_status",
         "amountDue": "amount_due",
+        "enrollmentStatus": "enrollment_status",
+        "financeNote": "finance_note",
+        "terminationNote": "termination_note",
     }
     updates = patch.model_dump(exclude_unset=True)
     if not updates:
@@ -324,6 +360,40 @@ def update_tuition_record(payload: TuitionRecordPatch, user=Depends(require_role
     return {"ok": True}
 
 
+@app.put("/api/assessments")
+def update_assessment_record(payload: AssessmentRecordPatch, user=Depends(require_roles("IT Admin", "Teacher"))):
+    with connect() as conn:
+        exists = conn.execute("SELECT id FROM students WHERE id = ?", (payload.studentId,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Student not found")
+        conn.execute(
+            """
+            INSERT INTO assessment_records
+            (student_id, quarter, islamic_studies, quran_reading, tajweed, memorization, practical, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(student_id, quarter) DO UPDATE SET
+              islamic_studies = excluded.islamic_studies,
+              quran_reading = excluded.quran_reading,
+              tajweed = excluded.tajweed,
+              memorization = excluded.memorization,
+              practical = excluded.practical,
+              note = excluded.note
+            """,
+            (
+                payload.studentId,
+                payload.quarter,
+                payload.islamicStudies,
+                payload.quranReading,
+                payload.tajweed,
+                payload.memorization,
+                payload.practical,
+                payload.note,
+            ),
+        )
+    audit("assessment.updated", {"actorId": user["id"], "studentId": payload.studentId, "quarter": payload.quarter})
+    return {"ok": True}
+
+
 @app.post("/api/applications", status_code=201)
 def create_application(payload: ApplicationCreate, user=Depends(require_roles("IT Admin", "Registration"))):
     app_id = f"a-{uuid4().hex[:10]}"
@@ -332,8 +402,10 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
         conn.execute(
             """
             INSERT INTO applications
-            (id, name, age, parent_name, parent_surname, phone, address, program, teacher, klass, submitted, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, age, parent_name, parent_surname, phone, address, program, teacher, klass, submitted, status,
+             emergency_contact1_name, emergency_contact1_phone, emergency_contact1_relation,
+             emergency_contact2_name, emergency_contact2_phone, emergency_contact2_relation, parent_telegram)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 app_id,
@@ -348,6 +420,13 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
                 payload.klass,
                 submitted,
                 "pending",
+                payload.emergencyContact1Name,
+                payload.emergencyContact1Phone,
+                payload.emergencyContact1Relation,
+                payload.emergencyContact2Name,
+                payload.emergencyContact2Phone,
+                payload.emergencyContact2Relation,
+                payload.parentTelegram,
             ),
         )
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
@@ -430,7 +509,7 @@ def delete_meeting(meeting_id: str, user=Depends(require_roles("IT Admin", "Regi
 
 
 @app.post("/api/actions/reminder")
-def queue_reminder(payload: dict, user=Depends(require_roles("IT Admin", "Finance"))):
+def queue_reminder(payload: dict, user=Depends(require_roles("IT Admin", "Finance", "Teacher"))):
     audit("reminder.queued", {**payload, "actorId": user["id"]})
     return {"queued": True}
 
@@ -457,7 +536,7 @@ def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingRespo
 
 @app.get("/api/finance/export")
 def finance_export(user=Depends(require_roles("IT Admin", "Finance"))):
-    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    months = ["September", "October", "November", "December", "January", "February", "March", "April", "May", "June"]
     with connect() as conn:
         students = conn.execute(
             """
@@ -522,7 +601,7 @@ def finance_receipts(user=Depends(require_roles("IT Admin", "Finance"))):
 @app.post("/api/finance/reconcile")
 def finance_reconcile(user=Depends(require_roles("IT Admin", "Finance"))):
     with connect() as conn:
-        total_due = conn.execute("SELECT COUNT(*) * 200 AS total FROM tuition_records WHERE status IN ('unpaid', 'absent')").fetchone()["total"]
+        total_due = conn.execute("SELECT COUNT(*) * 450 AS total FROM tuition_records WHERE status IN ('unpaid', 'absent')").fetchone()["total"]
         overdue = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status IN ('unpaid', 'absent')").fetchone()["count"]
         unpaid = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status = 'partial'").fetchone()["count"]
         paid = conn.execute("SELECT COUNT(*) AS count FROM tuition_records WHERE status = 'paid'").fetchone()["count"]

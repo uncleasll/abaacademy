@@ -135,6 +135,40 @@ def init_db() -> None:
             );
             """
         )
+        for statement in [
+            "ALTER TABLE students ADD COLUMN enrollment_status TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE students ADD COLUMN finance_note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE students ADD COLUMN termination_note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact1_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact1_phone TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact1_relation TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact2_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact2_phone TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN emergency_contact2_relation TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN parent_telegram TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE attendance_records ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+        ]:
+            try:
+                conn.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc):
+                    raise
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS assessment_records (
+              student_id TEXT NOT NULL,
+              quarter TEXT NOT NULL,
+              islamic_studies INTEGER NOT NULL DEFAULT 0,
+              quran_reading INTEGER NOT NULL DEFAULT 0,
+              tajweed INTEGER NOT NULL DEFAULT 0,
+              memorization INTEGER NOT NULL DEFAULT 0,
+              practical INTEGER NOT NULL DEFAULT 0,
+              note TEXT NOT NULL DEFAULT '',
+              PRIMARY KEY(student_id, quarter),
+              FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+            );
+            """
+        )
 
 
 def audit(event: str, payload: dict[str, Any] | None = None) -> None:

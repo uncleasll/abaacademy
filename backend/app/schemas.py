@@ -24,6 +24,9 @@ class Student(BaseModel):
     rank: int
     tuitionStatus: str
     amountDue: int
+    enrollmentStatus: str = "active"
+    financeNote: str = ""
+    terminationNote: str = ""
 
 
 class StudentPatch(BaseModel):
@@ -33,6 +36,9 @@ class StudentPatch(BaseModel):
     nextHw: str | None = None
     tuitionStatus: str | None = None
     amountDue: int | None = Field(default=None, ge=0)
+    enrollmentStatus: str | None = None
+    financeNote: str | None = None
+    terminationNote: str | None = None
 
 
 class Application(BaseModel):
@@ -48,6 +54,13 @@ class Application(BaseModel):
     klass: str
     submitted: str
     status: str
+    emergencyContact1Name: str = ""
+    emergencyContact1Phone: str = ""
+    emergencyContact1Relation: str = ""
+    emergencyContact2Name: str = ""
+    emergencyContact2Phone: str = ""
+    emergencyContact2Relation: str = ""
+    parentTelegram: str = ""
 
 
 class ApplicationCreate(BaseModel):
@@ -60,6 +73,13 @@ class ApplicationCreate(BaseModel):
     program: str
     teacher: str
     klass: str
+    emergencyContact1Name: str = ""
+    emergencyContact1Phone: str = ""
+    emergencyContact1Relation: str = ""
+    emergencyContact2Name: str = ""
+    emergencyContact2Phone: str = ""
+    emergencyContact2Relation: str = ""
+    parentTelegram: str = ""
 
 
 class StatusPatch(BaseModel):
@@ -123,6 +143,7 @@ class AttendanceRecordPatch(BaseModel):
     studentId: str
     date: str
     present: bool
+    note: str = ""
 
 
 class TuitionRecordPatch(BaseModel):
@@ -130,3 +151,14 @@ class TuitionRecordPatch(BaseModel):
     month: str
     status: str
     amount: int = Field(default=0, ge=0)
+
+
+class AssessmentRecordPatch(BaseModel):
+    studentId: str
+    quarter: str
+    islamicStudies: int = Field(ge=0, le=100)
+    quranReading: int = Field(ge=0, le=100)
+    tajweed: int = Field(ge=0, le=100)
+    memorization: int = Field(ge=0, le=100)
+    practical: int = Field(ge=0, le=100)
+    note: str = ""

@@ -28,6 +28,13 @@ const emptyForm = {
   parentName: "",
   parentSurname: "",
   phone: "",
+  emergencyContact1Name: "",
+  emergencyContact1Phone: "",
+  emergencyContact1Relation: "",
+  emergencyContact2Name: "",
+  emergencyContact2Phone: "",
+  emergencyContact2Relation: "",
+  parentTelegram: "",
   address: "",
   program: fallbackClassGroups[0]?.program ?? "",
   teacher: fallbackClassGroups[0]?.teacher ?? "",
@@ -168,6 +175,13 @@ export function ApplicationsPage() {
       parentName: form.parentName.trim(),
       parentSurname: form.parentSurname.trim(),
       phone: form.phone.trim(),
+      emergencyContact1Name: form.emergencyContact1Name.trim(),
+      emergencyContact1Phone: form.emergencyContact1Phone.trim(),
+      emergencyContact1Relation: form.emergencyContact1Relation.trim(),
+      emergencyContact2Name: form.emergencyContact2Name.trim(),
+      emergencyContact2Phone: form.emergencyContact2Phone.trim(),
+      emergencyContact2Relation: form.emergencyContact2Relation.trim(),
+      parentTelegram: form.parentTelegram.trim(),
       address: form.address.trim(),
       program: form.program,
       teacher: form.teacher,
@@ -223,7 +237,28 @@ export function ApplicationsPage() {
               <Field label="Parent first name" value={form.parentName} onChange={(parentName) => updateForm({ parentName })} placeholder="Parent first name" />
               <Field label="Parent last name" value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
             </div>
-            <Field label="Phone number" value={form.phone} onChange={(phone) => updateForm({ phone })} placeholder="(718) 555-0199" />
+            <Field label="Main phone number" value={form.phone} onChange={(phone) => updateForm({ phone })} placeholder="(718) 555-0199" />
+            <Field label="Parent Telegram" value={form.parentTelegram} onChange={(parentTelegram) => updateForm({ parentTelegram })} placeholder="@parent_username" />
+            <div className="rounded-xl border border-line bg-cream/50 p-3">
+              <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Emergency contact 1</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name" value={form.emergencyContact1Name} onChange={(emergencyContact1Name) => updateForm({ emergencyContact1Name })} placeholder="Contact name" />
+                <Field label="Phone" value={form.emergencyContact1Phone} onChange={(emergencyContact1Phone) => updateForm({ emergencyContact1Phone })} placeholder="(718) 555-0101" />
+              </div>
+              <div className="mt-3">
+                <Field label="Relation" value={form.emergencyContact1Relation} onChange={(emergencyContact1Relation) => updateForm({ emergencyContact1Relation })} placeholder="Mother, uncle, family friend" />
+              </div>
+            </div>
+            <div className="rounded-xl border border-line bg-cream/50 p-3">
+              <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Emergency contact 2</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name" value={form.emergencyContact2Name} onChange={(emergencyContact2Name) => updateForm({ emergencyContact2Name })} placeholder="Contact name" />
+                <Field label="Phone" value={form.emergencyContact2Phone} onChange={(emergencyContact2Phone) => updateForm({ emergencyContact2Phone })} placeholder="(718) 555-0102" />
+              </div>
+              <div className="mt-3">
+                <Field label="Relation" value={form.emergencyContact2Relation} onChange={(emergencyContact2Relation) => updateForm({ emergencyContact2Relation })} placeholder="Aunt, grandfather, neighbor" />
+              </div>
+            </div>
             <Field label="Home address" value={form.address} onChange={(address) => updateForm({ address })} placeholder="Brooklyn, NY 11219" />
 
             <div className="grid gap-3 sm:grid-cols-2">
