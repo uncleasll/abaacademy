@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CheckSquare, Save, Search, Star, UserCheck, UserX } from "lucide-react";
-import { AttendancePill, HwPill, SectionTitle } from "../components/ui";
+import {
+  AlertTriangle,
+  CalendarDays,
+  Check,
+  ClipboardCheck,
+  Save,
+  Search,
+  Star,
+  UserCheck,
+  UserX,
+} from "lucide-react";
+import { AttendancePill, HwPill } from "../components/ui";
 import { type AttendanceStatus, type HwStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
 
@@ -16,7 +26,7 @@ const hwOptions: { value: HwStatus; label: string }[] = [
   { value: "not_done", label: "Not Done" },
 ];
 
-function TeacherMetric({
+function SessionStat({
   label,
   value,
   detail,
@@ -25,17 +35,18 @@ function TeacherMetric({
   label: string;
   value: string;
   detail: string;
-  tone?: "default" | "dark" | "good" | "warn";
+  tone?: "default" | "dark" | "good" | "warn" | "bad";
 }) {
   const styles = {
     default: "border-line bg-white text-ink",
     dark: "border-green-800 bg-green-900 text-cream",
     good: "border-emerald-200 bg-emerald-50 text-emerald-950",
     warn: "border-amber-200 bg-amber-50 text-amber-950",
+    bad: "border-red-200 bg-red-50 text-red-950",
   };
 
   return (
-    <div className={`rounded-xl border p-4 shadow-sm ${styles[tone]}`}>
+    <div className={`rounded-lg border p-4 shadow-sm ${styles[tone]}`}>
       <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
         {label}
       </p>
@@ -46,20 +57,44 @@ function TeacherMetric({
 }
 
 export function TeacherRoster() {
-  const { applications, attendanceDates, attendanceRecords, classGroups, students, updateApplicationStatus, updateAttendanceRecord, updateStudent, user } = useAcademy();
+  const {
+    applications,
+    attendanceDates,
+    classGroups,
+    students,
+    updateApplicationStatus,
+    updateAttendanceRecord,
+    updateStudent,
+    user,
+  } = useAcademy();
   const teacherName = user?.name.split(" ")[0] ?? "";
-  const teacherStudents = students.filter((student) => student.teacher === teacherName);
-  const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
+  const teacherStudents = useMemo(
+    () => students.filter((student) => student.teacher === teacherName),
+    [students, teacherName]
+  );
+  const teacherGroups = useMemo(
+    () => classGroups.filter((group) => group.teacher === teacherName),
+    [classGroups, teacherName]
+  );
+  const sessionDate = attendanceDates[attendanceDates.length - 1] ?? new Date().toISOString().slice(0, 10);
+
   const [rows, setRows] = useState(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
-  const [groupFilter, setGroupFilter] = useState("All groups");
+  const [groupFilter, setGroupFilter] = useState(teacherGroups[0]?.name ?? "All groups");
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState(true);
-  const [notice, setNotice] = useState("Roster is ready for today's attendance and homework updates.");
+  const [sessionState, setSessionState] = useState<"not_started" | "in_progress" | "saved">("not_started");
+  const [notice, setNotice] = useState("Select a group and start today's class session.");
 
   useEffect(() => {
     setRows(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
-  }, [students, teacherName]);
+  }, [teacherStudents]);
 
+  useEffect(() => {
+    if (groupFilter !== "All groups" || !teacherGroups[0]) return;
+    setGroupFilter(teacherGroups[0].name);
+  }, [groupFilter, teacherGroups]);
+
+  const activeGroup = teacherGroups.find((group) => group.name === groupFilter);
   const visibleRows = rows.filter((row) => {
     const matchesGroup = groupFilter === "All groups" || row.klass === groupFilter;
     const matchesQuery = `${row.name} ${row.parentName} ${row.parentPhone} ${row.nextHwDraft}`
@@ -73,28 +108,31 @@ export function TeacherRoster() {
     const present = visibleRows.filter((row) => row.attendance === "present").length;
     const late = visibleRows.filter((row) => row.attendance === "late").length;
     const absent = visibleRows.filter((row) => row.attendance === "absent").length;
-    const completeHw = visibleRows.filter((row) => row.hw === "done").length;
-    const avgRating = visibleRows.length
-      ? (visibleRows.reduce((sum, row) => sum + row.stars, 0) / visibleRows.length).toFixed(1)
-      : "0.0";
-    return { present, late, absent, completeHw, avgRating };
+    const incompleteHw = visibleRows.filter((row) => row.hw !== "done").length;
+    const needsAttention = visibleRows.filter(
+      (row) => row.attendance === "absent" || row.hw === "not_done" || row.enrollmentStatus === "terminated"
+    );
+    return { present, late, absent, incompleteHw, needsAttention };
   }, [visibleRows]);
 
-  const recentDates = attendanceDates.slice(-5);
-  const attendanceMap = useMemo(() => {
-    const map = new Map<string, boolean>();
-    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.present));
-    return map;
-  }, [attendanceRecords]);
-  const dateLabel = (date: string) => {
-    const value = new Date(`${date}T00:00:00`);
-    return `${value.getMonth() + 1}/${value.getDate()}/${String(value.getFullYear()).slice(2)}`;
-  };
+  const sessionLabel = {
+    not_started: "Not started",
+    in_progress: "In progress",
+    saved: "Saved",
+  }[sessionState];
 
   const update = (id: string, patch: Partial<(typeof rows)[number]>) => {
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
     setSaved(false);
-    setNotice("Unsaved classroom changes are ready to save.");
+    setSessionState("in_progress");
+    setNotice("Unsaved class changes are ready.");
+  };
+
+  const setAllAttendance = (attendance: AttendanceStatus) => {
+    setRows((prev) => prev.map((row) => (visibleRows.some((item) => item.id === row.id) ? { ...row, attendance } : row)));
+    setSaved(false);
+    setSessionState("in_progress");
+    setNotice(`${visibleRows.length} students marked ${attendance}.`);
   };
 
   const saveChanges = () => {
@@ -109,85 +147,169 @@ export function TeacherRoster() {
         financeNote: row.financeNote,
         terminationNote: row.terminationNote,
       });
+      void updateAttendanceRecord(row.id, sessionDate, row.attendance !== "absent");
     });
     setSaved(true);
+    setSessionState("saved");
     setNotice(`${visibleRows.length} student records saved for today's class.`);
   };
 
+  const startSession = () => {
+    setSessionState("in_progress");
+    setNotice(`${activeGroup?.name ?? "Class"} session started. Take attendance first.`);
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <SectionTitle
-          eyebrow="Teacher"
-          title="Class workspace"
-          sub="Take attendance, grade homework, and prepare the next assignment in one clean view."
-        />
-        <button
-          onClick={saveChanges}
-          className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
-        >
-          {saved ? <Check size={16} /> : <Save size={16} />}
-          {saved ? "Saved" : "Save changes"}
-        </button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <TeacherMetric label="Students shown" value={String(visibleRows.length)} detail={groupFilter} tone="dark" />
-        <TeacherMetric label="Present" value={String(metrics.present)} detail={`${metrics.late} late · ${metrics.absent} absent`} tone="good" />
-        <TeacherMetric label="Homework done" value={String(metrics.completeHw)} detail="Completed before class" />
-        <TeacherMetric label="Average rating" value={metrics.avgRating} detail="Out of 5 stars" tone="warn" />
-      </div>
-
-      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
-
-      {incomingApplicants.length > 0 && (
-        <section className="rounded-xl border border-line bg-white shadow-sm">
-          <div className="border-b border-line px-5 py-4">
-            <h3 className="font-display text-lg text-ink">Incoming students</h3>
-            <p className="mt-0.5 text-sm text-ink/45">Registration assigned these applicants for teacher acceptance.</p>
-          </div>
-          <div className="divide-y divide-line">
-            {incomingApplicants.map((app) => (
-              <div key={app.id} className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_220px] md:items-center">
-                <div>
-                  <p className="font-semibold text-ink">{app.name}</p>
-                  <p className="mt-1 text-xs text-ink/45">
-                    Age {app.age} · {app.klass} · {app.program}
-                  </p>
-                  <p className="mt-1 text-xs text-ink/45">
-                    {app.parentName} {app.parentSurname} · {app.phone}
-                  </p>
-                </div>
-                <div className="flex gap-2 md:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void updateApplicationStatus(app.id, "accepted");
-                      setNotice(`${app.name} accepted for ${app.klass}.`);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
-                  >
-                    <UserCheck size={14} /> Accept
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void updateApplicationStatus(app.id, "rejected");
-                      setNotice(`${app.name} declined by teacher.`);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
-                  >
-                    <UserX size={14} /> Decline
-                  </button>
-                </div>
+    <div className="space-y-5">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_360px] xl:items-start">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-gold-500/15 px-2.5 py-1 text-xs font-semibold uppercase text-gold-600">
+                Teacher
+              </span>
+              <span className="rounded-md bg-cream px-2.5 py-1 text-xs font-semibold text-ink/55">{sessionLabel}</span>
+            </div>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Today's class session</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">
+              Take attendance first, update homework and rating as needed, then save the class session.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border border-line bg-cream/45 px-3 py-2">
+                <p className="text-xs font-semibold uppercase text-ink/40">Date</p>
+                <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
+                  <CalendarDays size={15} /> {sessionDate}
+                </p>
               </div>
-            ))}
+              <div className="rounded-lg border border-line bg-cream/45 px-3 py-2">
+                <p className="text-xs font-semibold uppercase text-ink/40">Group</p>
+                <p className="mt-1 text-sm font-semibold text-ink">{activeGroup?.name ?? groupFilter}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-cream/45 px-3 py-2">
+                <p className="text-xs font-semibold uppercase text-ink/40">Schedule</p>
+                <p className="mt-1 truncate text-sm font-semibold text-ink">{activeGroup?.schedule ?? "Class schedule"}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-cream/45 p-3">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              <select
+                value={groupFilter}
+                onChange={(event) => {
+                  setGroupFilter(event.target.value);
+                  setNotice(`${event.target.value} selected.`);
+                }}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                <option>All groups</option>
+                {teacherGroups.map((group) => (
+                  <option key={group.id}>{group.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={sessionState === "not_started" ? startSession : saveChanges}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
+              >
+                {sessionState === "not_started" ? <ClipboardCheck size={16} /> : saved ? <Check size={16} /> : <Save size={16} />}
+                {sessionState === "not_started" ? "Start class" : saved ? "Saved" : "Save class"}
+              </button>
+            </div>
+            <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <SessionStat label="Students" value={String(visibleRows.length)} detail={groupFilter} tone="dark" />
+        <SessionStat label="Present" value={String(metrics.present)} detail={`${metrics.late} late`} tone="good" />
+        <SessionStat label="Absent" value={String(metrics.absent)} detail="Parent follow-up signal" tone={metrics.absent ? "bad" : "default"} />
+        <SessionStat label="Homework issues" value={String(metrics.incompleteHw)} detail="Partial or not done" tone={metrics.incompleteHw ? "warn" : "default"} />
+        <SessionStat label="Incoming" value={String(incomingApplicants.length)} detail="Teacher decisions" />
+      </div>
+
+      {(incomingApplicants.length > 0 || metrics.needsAttention.length > 0) && (
+        <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
+          {incomingApplicants.length > 0 && (
+            <div className="rounded-lg border border-line bg-white shadow-sm">
+              <div className="border-b border-line px-5 py-4">
+                <h2 className="text-lg font-bold text-ink">Needs your decision</h2>
+                <p className="mt-0.5 text-sm text-ink/45">Registration assigned these incoming students to you.</p>
+              </div>
+              <div className="divide-y divide-line">
+                {incomingApplicants.map((app) => (
+                  <div key={app.id} className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_220px] md:items-center">
+                    <div>
+                      <p className="font-semibold text-ink">{app.name}</p>
+                      <p className="mt-1 text-xs text-ink/45">
+                        Age {app.age} · {app.klass} · {app.program}
+                      </p>
+                      <p className="mt-1 text-xs text-ink/45">
+                        {app.parentName} {app.parentSurname} · {app.phone}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 md:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void updateApplicationStatus(app.id, "accepted");
+                          setNotice(`${app.name} accepted for ${app.klass}.`);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+                      >
+                        <UserCheck size={14} /> Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void updateApplicationStatus(app.id, "rejected");
+                          setNotice(`${app.name} declined by teacher.`);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
+                      >
+                        <UserX size={14} /> Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-line bg-white shadow-sm">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
+                <AlertTriangle size={18} /> Needs attention
+              </h2>
+              <p className="mt-0.5 text-sm text-ink/45">Absent, homework issue, or enrollment note.</p>
+            </div>
+            <div className="divide-y divide-line">
+              {metrics.needsAttention.slice(0, 6).map((student) => (
+                <div key={student.id} className="px-5 py-3">
+                  <p className="text-sm font-semibold text-ink">{student.name}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <AttendancePill status={student.attendance} />
+                    <HwPill status={student.hw} />
+                    {student.enrollmentStatus === "terminated" && (
+                      <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Terminated</span>
+                    )}
+                  </div>
+                  {(student.terminationNote || student.financeNote) && (
+                    <p className="mt-2 text-xs font-semibold text-amber-700">{student.terminationNote || student.financeNote}</p>
+                  )}
+                </div>
+              ))}
+              {metrics.needsAttention.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-ink/40">No classroom issues in this group.</p>
+              )}
+            </div>
           </div>
         </section>
       )}
 
-      <section className="rounded-xl border border-line bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_210px]">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_auto] lg:items-center">
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={17} />
             <input
@@ -197,79 +319,66 @@ export function TeacherRoster() {
               className="w-full rounded-lg border border-line bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-gold-500"
             />
           </label>
-          <select
-            value={groupFilter}
-            onChange={(event) => setGroupFilter(event.target.value)}
-            className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-          >
-            <option>All groups</option>
-            {teacherGroups.map((group) => (
-              <option key={group.id}>{group.name}</option>
+          <div className="flex flex-wrap gap-2">
+            {attendanceOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setAllAttendance(option.value)}
+                className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+              >
+                Mark all {option.label}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
 
-        <div className="divide-y divide-line md:hidden">
+        <div className="grid gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3">
           {visibleRows.map((student) => (
-            <div key={student.id} className="space-y-4 p-4">
-              <div>
-                <p className="font-semibold text-ink">{student.name}</p>
-                <p className="mt-1 text-xs text-ink/45">
-                  {student.klass} · {student.parentPhone}
-                </p>
-                {(student.enrollmentStatus === "terminated" || student.financeNote) && (
-                  <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700">
-                    {student.enrollmentStatus === "terminated" ? "Terminated" : "Finance note"}: {student.terminationNote || student.financeNote}
+            <article
+              key={student.id}
+              className={`rounded-lg border p-4 shadow-sm ${
+                student.attendance === "absent"
+                  ? "border-red-200 bg-red-50/60"
+                  : student.hw === "not_done"
+                    ? "border-amber-200 bg-amber-50/55"
+                    : "border-line bg-white"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-ink">{student.name}</p>
+                  <p className="mt-1 text-xs text-ink/45">
+                    {student.klass} · {student.parentPhone}
                   </p>
-                )}
+                </div>
+                <AttendancePill status={student.attendance} />
               </div>
 
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase text-ink/40">Attendance</span>
-                  <AttendancePill status={student.attendance} />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {attendanceOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => update(student.id, { attendance: option.value })}
-                      className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${
-                        student.attendance === option.value
-                          ? "bg-green-900 text-cream"
-                          : "bg-cream text-ink/45 hover:bg-line"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {attendanceOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => update(student.id, { attendance: option.value })}
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${
+                      student.attendance === option.value
+                        ? "bg-green-900 text-cream"
+                        : "border border-line bg-white text-ink/55 hover:border-gold-500 hover:text-gold-600"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase text-ink/40">Rating</p>
-                  <div className="flex gap-1">
-                    {Array.from({ length: 5 }).map((_, index) => (
-                      <button key={index} onClick={() => update(student.id, { stars: index + 1 })}>
-                        <Star
-                          size={20}
-                          className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase text-ink/40">Homework</span>
-                    <HwPill status={student.hw} />
-                  </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_150px]">
+                <label className="space-y-1.5 text-xs font-semibold uppercase text-ink/40">
+                  Homework
                   <select
                     value={student.hw}
                     onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
-                    className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+                    className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold normal-case text-ink outline-none focus:border-gold-500"
                   >
                     {hwOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -277,10 +386,28 @@ export function TeacherRoster() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase text-ink/40">Rating</p>
+                  <div className="flex h-[38px] items-center gap-0.5 rounded-lg border border-line bg-white px-2">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => update(student.id, { stars: index + 1 })}
+                        className="inline-flex h-8 w-6 items-center justify-center"
+                      >
+                        <Star
+                          size={17}
+                          className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
+                        />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <label className="space-y-1.5 text-xs font-semibold uppercase text-ink/40">
+              <label className="mt-4 block space-y-1.5 text-xs font-semibold uppercase text-ink/40">
                 Next assignment
                 <input
                   value={student.nextHwDraft}
@@ -288,171 +415,44 @@ export function TeacherRoster() {
                   className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium normal-case text-ink outline-none focus:border-gold-500"
                 />
               </label>
-              <div className="space-y-2 rounded-lg border border-line bg-cream/50 p-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    update(student.id, {
-                      enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
-                      terminationNote: student.enrollmentStatus === "terminated" ? "" : student.terminationNote || "Teacher marked terminated. Finance review needed.",
-                      financeNote: student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
-                    })
-                  }
-                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold ${
-                    student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "bg-white text-ink/65 hover:text-red-600"
-                  }`}
-                >
-                  <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Mark terminated"}
-                </button>
-                <textarea
-                  value={student.terminationNote ?? ""}
+
+              <div className="mt-4 rounded-lg border border-line bg-cream/45 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      update(student.id, {
+                        enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
+                        terminationNote:
+                          student.enrollmentStatus === "terminated"
+                            ? ""
+                            : student.terminationNote || "Teacher marked terminated. Finance review needed.",
+                        financeNote:
+                          student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
+                      })
+                    }
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${
+                      student.enrollmentStatus === "terminated"
+                        ? "bg-red-600 text-white"
+                        : "border border-line bg-white text-ink/55 hover:border-red-200 hover:text-red-600"
+                    }`}
+                  >
+                    <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
+                  </button>
+                  <HwPill status={student.hw} />
+                </div>
+                <input
+                  value={student.terminationNote ?? student.financeNote ?? ""}
                   onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
-                  placeholder="Note for finance"
-                  className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm normal-case text-ink outline-none focus:border-gold-500"
+                  placeholder="Optional note visible to finance"
+                  className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
                 />
               </div>
-            </div>
+            </article>
           ))}
           {visibleRows.length === 0 && (
-            <div className="px-5 py-12 text-center text-sm text-ink/40">
-              No students match this view.
-            </div>
+            <div className="col-span-full px-5 py-12 text-center text-sm text-ink/40">No students match this view.</div>
           )}
-        </div>
-
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-[1180px] w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-line bg-cream/60 text-xs uppercase text-ink/45">
-                <th className="px-5 py-3 font-semibold">Student</th>
-                <th className="px-5 py-3 font-semibold">Attendance</th>
-                {recentDates.map((date) => (
-                  <th key={date} className="px-3 py-3 text-center font-semibold">{dateLabel(date)}</th>
-                ))}
-                <th className="px-5 py-3 font-semibold">Rating</th>
-                <th className="px-5 py-3 font-semibold">Homework</th>
-                <th className="min-w-72 px-5 py-3 font-semibold">Next assignment</th>
-                <th className="min-w-72 px-5 py-3 font-semibold">Finance / enrollment note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((student) => (
-                <tr key={student.id} className="border-b border-line last:border-0 hover:bg-cream/50">
-                  <td className="px-5 py-4">
-                    <p className="font-semibold text-ink">{student.name}</p>
-                    <p className="mt-1 text-xs text-ink/45">
-                      {student.klass} · {student.parentPhone}
-                    </p>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="mb-2">
-                      <AttendancePill status={student.attendance} />
-                    </div>
-                    <div className="flex gap-1">
-                      {attendanceOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          onClick={() => update(student.id, { attendance: option.value })}
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
-                            student.attendance === option.value
-                              ? "bg-green-900 text-cream"
-                              : "bg-cream text-ink/45 hover:bg-line"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
-                  {recentDates.map((date) => {
-                    const checked = attendanceMap.get(`${student.id}:${date}`) ?? false;
-                    return (
-                      <td key={date} className="px-3 py-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => void updateAttendanceRecord(student.id, date, !checked)}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
-                            checked ? "border-green-800 bg-green-900 text-white" : "border-ink/35 bg-white text-transparent"
-                          }`}
-                          aria-label={`${checked ? "Mark absent" : "Mark present"} ${student.name} on ${date}`}
-                        >
-                          <CheckSquare size={16} />
-                        </button>
-                      </td>
-                    );
-                  })}
-                  <td className="px-5 py-4">
-                    <div className="flex gap-0.5">
-                      {Array.from({ length: 5 }).map((_, index) => (
-                        <button key={index} onClick={() => update(student.id, { stars: index + 1 })}>
-                          <Star
-                            size={17}
-                            className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="mb-2">
-                      <HwPill status={student.hw} />
-                    </div>
-                    <select
-                      value={student.hw}
-                      onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
-                      className="rounded-lg border border-line bg-white px-2.5 py-2 text-xs outline-none focus:border-gold-500"
-                    >
-                      {hwOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-5 py-4">
-                    <input
-                      value={student.nextHwDraft}
-                      onChange={(event) => update(student.id, { nextHwDraft: event.target.value })}
-                      className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
-                    />
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          update(student.id, {
-                            enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
-                            terminationNote: student.enrollmentStatus === "terminated" ? "" : student.terminationNote || "Teacher marked terminated. Finance review needed.",
-                            financeNote: student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
-                          })
-                        }
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold ${
-                          student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "border border-line text-ink/55 hover:border-red-300 hover:text-red-600"
-                        }`}
-                      >
-                        <UserX size={14} />
-                        {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
-                      </button>
-                      <input
-                        value={student.terminationNote ?? student.financeNote ?? ""}
-                        onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
-                        placeholder="Optional note visible to finance"
-                        className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
-                      />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {visibleRows.length === 0 && (
-                <tr>
-                  <td colSpan={5 + recentDates.length} className="px-5 py-12 text-center text-sm text-ink/40">
-                    No students match this view.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         </div>
       </section>
     </div>

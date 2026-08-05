@@ -1,19 +1,18 @@
 import { useMemo, useState } from "react";
 import {
-  ArrowUpRight,
+  AlertTriangle,
   Bell,
   CheckCircle2,
   CreditCard,
   Download,
-  Filter,
+  Phone,
   ReceiptText,
   Search,
-  TrendingUp,
+  ShieldAlert,
   Wallet,
 } from "lucide-react";
-import { SectionTitle } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
-import type { MonthlyPaymentStatus, PaymentStatus } from "../data/mockData";
+import type { MonthlyPaymentStatus, PaymentStatus, Student } from "../data/mockData";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -21,50 +20,59 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
-function FinanceMetric({
-  label,
-  value,
-  detail,
-  icon: Icon,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: typeof Wallet;
-  tone?: "default" | "dark" | "warn" | "good";
-}) {
-  const styles = {
-    default: "border-line bg-white text-ink",
-    dark: "border-green-800 bg-green-900 text-cream",
-    warn: "border-amber-200 bg-amber-50 text-amber-950",
-    good: "border-emerald-200 bg-emerald-50 text-emerald-950",
-  };
-
-  return (
-    <div className={`rounded-xl border p-4 shadow-sm ${styles[tone]}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
-            {label}
-          </p>
-          <p className="mt-2 text-2xl font-semibold">{value}</p>
-        </div>
-        <div className={`rounded-lg p-2 ${tone === "dark" ? "bg-white/10 text-gold-300" : "bg-white/80 text-ink/50"}`}>
-          <Icon size={18} />
-        </div>
-      </div>
-      <p className={`mt-3 text-xs ${tone === "dark" ? "text-cream/65" : "text-ink/50"}`}>{detail}</p>
-    </div>
-  );
-}
-
 const paymentStatusOptions: { key: PaymentStatus | "all"; label: string }[] = [
   { key: "all", label: "All" },
   { key: "overdue", label: "Overdue" },
   { key: "unpaid", label: "Pending" },
   { key: "paid", label: "Paid" },
 ];
+
+function WorkbenchStat({
+  label,
+  value,
+  detail,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "default" | "dark" | "good" | "warn" | "bad";
+}) {
+  const styles = {
+    default: "border-line bg-white text-ink",
+    dark: "border-green-800 bg-green-900 text-cream",
+    good: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    warn: "border-amber-200 bg-amber-50 text-amber-950",
+    bad: "border-red-200 bg-red-50 text-red-950",
+  };
+
+  return (
+    <div className={`rounded-lg border p-4 shadow-sm ${styles[tone]}`}>
+      <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+      <p className={`mt-2 text-xs ${tone === "dark" ? "text-cream/65" : "text-ink/50"}`}>{detail}</p>
+    </div>
+  );
+}
+
+function StudentTags({ student, missed }: { student: Student; missed: number }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.teacher}</span>
+      <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.klass}</span>
+      {missed > 0 && (
+        <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+          {missed} missed
+        </span>
+      )}
+      {student.enrollmentStatus === "terminated" && (
+        <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white">Do not contact</span>
+      )}
+    </div>
+  );
+}
 
 export function FinanceOverview() {
   const {
@@ -79,7 +87,7 @@ export function FinanceOverview() {
     reconcileFinance,
     updateTuitionRecord,
   } = useAcademy();
-  const [notice, setNotice] = useState("Finance dashboard is current for July 2026.");
+  const [notice, setNotice] = useState("Collections workbench is ready.");
   const [reminded, setReminded] = useState<string[]>([]);
   const [workingAction, setWorkingAction] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -107,22 +115,37 @@ export function FinanceOverview() {
     tuitionRecords.forEach((record) => map.set(`${record.studentId}:${record.month}`, record));
     return map;
   }, [tuitionRecords]);
+  const missedMap = useMemo(() => {
+    const map = new Map<string, { missed: number; total: number }>();
+    scopedStudents.forEach((student) => {
+      const recent = attendanceDates
+        .slice(-12)
+        .map((date) => attendanceRecords.find((record) => record.studentId === student.id && record.date === date))
+        .filter(Boolean);
+      map.set(student.id, {
+        missed: recent.filter((record) => !record!.present).length,
+        total: recent.length,
+      });
+    });
+    return map;
+  }, [attendanceDates, attendanceRecords, scopedStudents]);
 
   const summary = useMemo(() => {
     const monthStatus = (studentId: string) => tuitionMap.get(`${studentId}:${monthFilter}`)?.status ?? "unpaid";
     const monthAmount = (studentId: string) => tuitionMap.get(`${studentId}:${monthFilter}`)?.amount ?? 0;
-    const overdue = scopedStudents.filter((student) => student.tuitionStatus === "overdue" && monthStatus(student.id) !== "paid");
-    const pending = scopedStudents.filter((student) => monthStatus(student.id) === "unpaid" && student.tuitionStatus !== "overdue");
     const paid = scopedStudents.filter((student) => monthStatus(student.id) === "paid");
-    const financeFlags = scopedStudents.filter((student) => student.attendance === "absent" || student.enrollmentStatus === "terminated" || student.financeNote);
-    const totalDue = scopedStudents.reduce((sum, student) => sum + (monthStatus(student.id) === "paid" ? 0 : student.amountDue || 450 - monthAmount(student.id)), 0);
+    const open = scopedStudents.filter((student) => monthStatus(student.id) !== "paid");
+    const doNotContact = open.filter((student) => student.enrollmentStatus === "terminated");
+    const contactable = open.filter((student) => student.enrollmentStatus !== "terminated");
+    const totalDue = open.reduce((sum, student) => sum + (student.amountDue || Math.max(0, 450 - monthAmount(student.id))), 0);
     const collected = scopedStudents.reduce((sum, student) => sum + monthAmount(student.id), 0);
     const collectible = totalDue + collected;
     const collectionRate = collectible ? Math.round((collected / collectible) * 100) : 0;
-    return { overdue, pending, paid, financeFlags, totalDue, collectionRate };
-  }, [monthFilter, scopedStudents, tuitionMap]);
+    const risk = contactable.filter((student) => (missedMap.get(student.id)?.missed ?? 0) >= 2 || student.financeNote);
+    return { paid, open, doNotContact, contactable, totalDue, collected, collectionRate, risk };
+  }, [missedMap, monthFilter, scopedStudents, tuitionMap]);
 
-  const queue = [...summary.overdue, ...summary.pending]
+  const contactQueue = summary.contactable
     .filter((student) => {
       const matchesStatus = statusFilter === "all" || student.tuitionStatus === statusFilter;
       const matchesQuery = `${student.name} ${student.parentName} ${student.parentPhone} ${student.klass} ${student.teacher}`
@@ -130,25 +153,15 @@ export function FinanceOverview() {
         .includes(query.toLowerCase());
       return matchesStatus && matchesQuery;
     })
-    .sort((a, b) => b.amountDue - a.amountDue);
-  const collectedEstimate = scopedStudents.reduce((sum, student) => sum + (tuitionMap.get(`${student.id}:${monthFilter}`)?.amount ?? 0), 0);
-  const highestDue = Math.max(...scopedStudents.map((student) => student.amountDue), 1);
-  const attendanceRisk = useMemo(
-    () =>
-      scopedStudents
-        .map((student) => {
-          const recent = attendanceDates
-            .slice(-12)
-            .map((date) => attendanceRecords.find((record) => record.studentId === student.id && record.date === date))
-            .filter(Boolean);
-          const missed = recent.filter((record) => !record!.present).length;
-          return { student, missed, total: recent.length };
-        })
-        .filter((item) => item.missed > 0 || item.student.enrollmentStatus === "terminated")
-        .sort((a, b) => b.missed - a.missed)
-        .slice(0, 6),
-    [attendanceDates, attendanceRecords, scopedStudents]
+    .sort((a, b) => {
+      const missedDelta = (missedMap.get(b.id)?.missed ?? 0) - (missedMap.get(a.id)?.missed ?? 0);
+      if (missedDelta) return missedDelta;
+      return b.amountDue - a.amountDue;
+    });
+  const doNotContactQueue = summary.doNotContact.filter((student) =>
+    `${student.name} ${student.parentName} ${student.parentPhone} ${student.klass} ${student.teacher}`.toLowerCase().includes(query.toLowerCase())
   );
+  const highestDue = Math.max(...scopedStudents.map((student) => student.amountDue), 1);
 
   const paymentCellClass: Record<MonthlyPaymentStatus, string> = {
     paid: "bg-emerald-400/90 text-emerald-950",
@@ -159,16 +172,16 @@ export function FinanceOverview() {
     absent: "bg-red-500 text-white",
   };
 
-  const remindFamily = (id: string, parentName: string) => {
-    void queueReminder({ studentId: id, parentName });
-    setReminded((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setNotice(`Reminder queued for ${parentName}.`);
+  const remindFamily = (student: Student) => {
+    void queueReminder({ studentId: student.id, parentName: student.parentName, month: monthFilter });
+    setReminded((prev) => (prev.includes(student.id) ? prev : [...prev, student.id]));
+    setNotice(`Reminder queued for ${student.parentName}.`);
   };
 
   const queueAll = () => {
-    void queueReminder({ scope: "finance-overview", studentIds: queue.map((student) => student.id) });
-    setReminded(queue.map((student) => student.id));
-    setNotice(`${queue.length} payment reminders queued.`);
+    void queueReminder({ scope: "finance-contact-today", month: monthFilter, studentIds: contactQueue.map((student) => student.id) });
+    setReminded(contactQueue.map((student) => student.id));
+    setNotice(`${contactQueue.length} contactable reminders queued. Terminated students were excluded.`);
   };
 
   const runAction = async (key: string, action: () => Promise<void>) => {
@@ -183,85 +196,75 @@ export function FinanceOverview() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <SectionTitle
-          eyebrow="Finance"
-          title="Finance overview"
-          sub="Tuition collection, family follow-ups, monthly status, and export tools in one operating view."
-        />
-        <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-white p-2 shadow-sm">
-          <button
-            onClick={queueAll}
-            className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
-          >
-            <Bell size={16} /> Queue reminders
-          </button>
-          <button
-            onClick={() =>
-              void runAction("export", async () => {
-                await downloadFinanceExport();
-                setNotice("Tuition report CSV downloaded.");
-              })
-            }
-            disabled={workingAction === "export"}
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm hover:border-gold-500 hover:text-gold-600"
-          >
-            <Download size={16} /> {workingAction === "export" ? "Exporting..." : "Export"}
-          </button>
+    <div className="space-y-5">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_420px] xl:items-start">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-md bg-gold-500/15 px-2.5 py-1 text-xs font-semibold uppercase text-gold-600">
+                Finance
+              </span>
+              <span className="rounded-md bg-cream px-2.5 py-1 text-xs font-semibold text-ink/55">{monthFilter}</span>
+            </div>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Collections & risk workbench</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">
+              Start with contactable families, keep terminated students out of outreach, and use attendance signals before calling parents.
+            </p>
+          </div>
+          <div className="rounded-lg border border-line bg-cream/45 p-3">
+            <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+              <select
+                value={monthFilter}
+                onChange={(event) => setMonthFilter(event.target.value)}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                {tuitionMonths.map((month) => (
+                  <option key={month}>{month}</option>
+                ))}
+              </select>
+              <select
+                value={teacherFilter}
+                onChange={(event) => {
+                  setTeacherFilter(event.target.value);
+                  setGroupFilter("All groups");
+                }}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                <option>All teachers</option>
+                {teachers.map((teacher) => (
+                  <option key={teacher}>{teacher}</option>
+                ))}
+              </select>
+              <select
+                value={groupFilter}
+                onChange={(event) => setGroupFilter(event.target.value)}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                <option>All groups</option>
+                {groupOptions.map((group) => (
+                  <option key={group}>{group}</option>
+                ))}
+              </select>
+            </div>
+            <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>
+          </div>
         </div>
+      </section>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <WorkbenchStat label="Contact today" value={String(contactQueue.length)} detail="Excludes terminated" tone="dark" />
+        <WorkbenchStat label="Do not contact" value={String(doNotContactQueue.length)} detail="Terminated or stop billing" tone={doNotContactQueue.length ? "bad" : "default"} />
+        <WorkbenchStat label="Attendance risk" value={String(summary.risk.length)} detail="Missed classes or notes" tone={summary.risk.length ? "warn" : "default"} />
+        <WorkbenchStat label="Outstanding" value={usd.format(summary.totalDue)} detail={`${monthFilter} open balance`} tone="warn" />
+        <WorkbenchStat label="Collected" value={`${summary.collectionRate}%`} detail={usd.format(summary.collected)} tone="good" />
       </div>
 
-      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
-
-      <div className="grid gap-3 rounded-xl border border-line bg-white p-4 shadow-sm lg:grid-cols-3">
-        <select
-          value={monthFilter}
-          onChange={(event) => setMonthFilter(event.target.value)}
-          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-        >
-          {tuitionMonths.map((month) => (
-            <option key={month}>{month}</option>
-          ))}
-        </select>
-        <select
-          value={teacherFilter}
-          onChange={(event) => {
-            setTeacherFilter(event.target.value);
-            setGroupFilter("All groups");
-          }}
-          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-        >
-          <option>All teachers</option>
-          {teachers.map((teacher) => (
-            <option key={teacher}>{teacher}</option>
-          ))}
-        </select>
-        <select
-          value={groupFilter}
-          onChange={(event) => setGroupFilter(event.target.value)}
-          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-        >
-          <option>All groups</option>
-          {groupOptions.map((group) => (
-            <option key={group}>{group}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <FinanceMetric label="Outstanding" value={usd.format(summary.totalDue)} detail={`${monthFilter}: ${summary.overdue.length + summary.pending.length} families need follow-up`} icon={Wallet} tone="dark" />
-        <FinanceMetric label="Collected" value={usd.format(collectedEstimate)} detail={`${summary.collectionRate}% collection rate for filter`} icon={TrendingUp} tone="good" />
-        <FinanceMetric label="Overdue" value={String(summary.overdue.length)} detail="Prioritize these today" icon={Bell} tone="warn" />
-        <FinanceMetric label="Flags" value={String(summary.financeFlags.length)} detail="Absent, notes, or terminated" icon={ReceiptText} />
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-        <section data-payment-queue className="rounded-xl border border-line bg-white shadow-sm">
-          <div className="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+        <section data-payment-queue className="rounded-lg border border-line bg-white shadow-sm">
+          <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
-              <h3 className="font-display text-lg text-ink">Payment queue</h3>
-              <p className="mt-0.5 text-sm text-ink/45">Families sorted by balance, urgency, and current filter.</p>
+              <h2 className="text-lg font-bold text-ink">Contact today</h2>
+              <p className="mt-0.5 text-sm text-ink/45">Sorted by missed classes first, then balance. Terminated students are excluded.</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <label className="relative min-w-64">
@@ -273,128 +276,149 @@ export function FinanceOverview() {
                   className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
                 />
               </label>
-              <label className="relative">
-                <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={15} />
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as PaymentStatus | "all")}
-                  className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-8 text-sm outline-none focus:border-gold-500"
-                >
-                  {paymentStatusOptions.map((option) => (
-                    <option key={option.key} value={option.key}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as PaymentStatus | "all")}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+              >
+                {paymentStatusOptions.map((option) => (
+                  <option key={option.key} value={option.key}>{option.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={queueAll}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
+              >
+                <Bell size={16} /> Queue all
+              </button>
             </div>
           </div>
 
           <div className="divide-y divide-line">
-            {queue.map((student) => (
-              <div key={student.id} className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_170px_126px] md:items-center">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink">{student.name}</p>
-                  <p className="mt-1 text-xs text-ink/45">
-                    {student.parentName} · {student.parentPhone}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.teacher}</span>
-                    <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.klass}</span>
-                    {student.attendance === "absent" && (
-                      <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">Absent</span>
-                    )}
-                    {student.enrollmentStatus === "terminated" && (
-                      <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white">Terminated</span>
-                    )}
-                  </div>
-                  {(student.financeNote || student.terminationNote) && (
-                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                      {student.terminationNote || student.financeNote}
+            {contactQueue.map((student) => {
+              const missed = missedMap.get(student.id)?.missed ?? 0;
+              const monthRecord = tuitionMap.get(`${student.id}:${monthFilter}`);
+              const monthDue = monthRecord?.status === "paid" ? 0 : student.amountDue || Math.max(0, 450 - (monthRecord?.amount ?? 0));
+              const suggestedAction = missed >= 3 ? "Call before reminder" : student.tuitionStatus === "overdue" ? "Payment reminder" : "Friendly follow-up";
+              return (
+                <div key={student.id} className="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_170px_132px] lg:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-ink">{student.name}</p>
+                      <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                        {suggestedAction}
+                      </span>
+                    </div>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-ink/45">
+                      <Phone size={12} /> {student.parentName} · {student.parentPhone}
                     </p>
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <p className="text-sm font-semibold text-ink">{usd.format(student.amountDue)}</p>
-                    <p className={student.tuitionStatus === "overdue" ? "text-xs font-semibold text-red-600" : "text-xs font-semibold text-amber-600"}>
-                      {student.tuitionStatus === "overdue" ? "Overdue" : "Pending"}
-                    </p>
+                    <StudentTags student={student} missed={missed} />
+                    {(student.financeNote || student.terminationNote) && (
+                      <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                        {student.terminationNote || student.financeNote}
+                      </p>
+                    )}
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
-                    <div
-                      className={student.tuitionStatus === "overdue" ? "h-full rounded-full bg-red-500" : "h-full rounded-full bg-amber-400"}
-                      style={{ width: `${Math.max(8, Math.round((student.amountDue / highestDue) * 100))}%` }}
-                    />
+                  <div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="text-sm font-semibold text-ink">{usd.format(monthDue)}</p>
+                      <p className={student.tuitionStatus === "overdue" ? "text-xs font-semibold text-red-600" : "text-xs font-semibold text-amber-600"}>
+                        {student.tuitionStatus === "overdue" ? "Overdue" : "Pending"}
+                      </p>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
+                      <div
+                        className={student.tuitionStatus === "overdue" ? "h-full rounded-full bg-red-500" : "h-full rounded-full bg-amber-400"}
+                        style={{ width: `${Math.max(8, Math.round((monthDue / highestDue) * 100))}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-ink/45">{monthFilter} balance</p>
                   </div>
-                  <p className={student.tuitionStatus === "overdue" ? "text-xs text-red-600" : "text-xs text-amber-600"}>
-                    Balance priority
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => remindFamily(student)}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      reminded.includes(student.id)
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-line text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                    }`}
+                  >
+                    {reminded.includes(student.id) ? <CheckCircle2 size={14} /> : <Bell size={14} />}
+                    {reminded.includes(student.id) ? "Queued" : "Remind"}
+                  </button>
                 </div>
-                <button
-                  onClick={() => remindFamily(student.id, student.parentName)}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold ${
-                    reminded.includes(student.id)
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-line text-ink/60 hover:border-gold-500 hover:text-gold-600"
-                  }`}
-                >
-                  {reminded.includes(student.id) ? <CheckCircle2 size={14} /> : <Bell size={14} />}
-                  {reminded.includes(student.id) ? "Queued" : "Remind"}
-                </button>
-              </div>
-            ))}
-            {queue.length === 0 && (
-              <div className="px-5 py-12 text-center text-sm text-ink/40">
-                No families match this finance queue filter.
-              </div>
+              );
+            })}
+            {contactQueue.length === 0 && (
+              <div className="px-5 py-12 text-center text-sm text-ink/40">No contactable families match this filter.</div>
             )}
           </div>
         </section>
 
-        <section className="rounded-xl border border-line bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-display text-lg text-ink">Collection health</h3>
-              <p className="mt-0.5 text-sm text-ink/45">Current payment distribution</p>
+        <div className="space-y-5">
+          <section className="rounded-lg border border-red-200 bg-red-50 shadow-sm">
+            <div className="border-b border-red-200 px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-red-950">
+                <ShieldAlert size={18} /> Do not contact
+              </h2>
+              <p className="mt-0.5 text-sm text-red-900/60">Keep these families out of reminder blasts until finance reviews them.</p>
             </div>
-            <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
-              {summary.collectionRate}%
-            </span>
-          </div>
-          <div className="mt-5 space-y-5">
-            {[
-              { label: "Paid families", value: summary.paid.length, total: scopedStudents.length || 1, color: "bg-emerald-500" },
-              { label: "Pending families", value: summary.pending.length, total: scopedStudents.length || 1, color: "bg-amber-400" },
-              { label: "Overdue families", value: summary.overdue.length, total: scopedStudents.length || 1, color: "bg-red-500" },
-            ].map((item) => {
-              const pct = Math.round((item.value / item.total) * 100);
-              return (
-                <div key={item.label}>
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="font-medium text-ink">{item.label}</span>
-                    <span className="text-ink/45">{pct}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-line">
-                    <div className={`h-full rounded-full ${item.color}`} style={{ width: `${pct}%` }} />
-                  </div>
+            <div className="divide-y divide-red-200">
+              {doNotContactQueue.map((student) => (
+                <div key={student.id} className="px-5 py-4">
+                  <p className="text-sm font-semibold text-red-950">{student.name}</p>
+                  <p className="mt-1 text-xs text-red-900/60">{student.parentName} · {student.parentPhone}</p>
+                  <StudentTags student={student} missed={missedMap.get(student.id)?.missed ?? 0} />
+                  <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-semibold text-red-800">
+                    {student.terminationNote || student.financeNote || "Terminated. Verify before outreach."}
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-6 rounded-xl border border-line bg-cream/60 p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-ink/60">
-                <Wallet size={18} />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-ink">Monthly tuition</p>
-                <p className="text-xs text-ink/45">$450 standard plan · September-June only</p>
-              </div>
+              ))}
+              {doNotContactQueue.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-red-900/45">No terminated students in this filter.</p>
+              )}
             </div>
-          </div>
+          </section>
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-ink">Finance actions</h2>
+                <p className="mt-0.5 text-sm text-ink/45">Exports, receipts, and reconciliation.</p>
+              </div>
+              <Wallet size={20} className="text-ink/35" />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction("export", async () => {
+                    await downloadFinanceExport();
+                    setNotice("Tuition report CSV downloaded.");
+                  })
+                }
+                disabled={workingAction === "export"}
+                className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
+              >
+                <Download size={14} /> {workingAction === "export" ? "Exporting" : "Export"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction("receipts", async () => {
+                    await downloadReceipts();
+                    setNotice("Paid-family receipts CSV downloaded.");
+                  })
+                }
+                disabled={workingAction === "receipts"}
+                className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
+              >
+                <ReceiptText size={14} /> {workingAction === "receipts" ? "Preparing" : "Receipts"}
+              </button>
+            </div>
             <button
+              type="button"
               onClick={() =>
                 void runAction("reconcile", async () => {
                   const result = await reconcileFinance();
@@ -404,67 +428,43 @@ export function FinanceOverview() {
                 })
               }
               disabled={workingAction === "reconcile"}
-              className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
             >
-              <CreditCard size={14} /> {workingAction === "reconcile" ? "Checking..." : "Reconcile"}
+              <CreditCard size={15} /> {workingAction === "reconcile" ? "Checking..." : "Reconcile finance"}
             </button>
-            <button
-              onClick={() =>
-                void runAction("receipts", async () => {
-                  await downloadReceipts();
-                  setNotice("Paid-family receipts CSV downloaded.");
-                })
-              }
-              disabled={workingAction === "receipts"}
-              className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
-            >
-              <ReceiptText size={14} /> {workingAction === "receipts" ? "Preparing..." : "Receipts"}
-            </button>
-          </div>
+          </section>
 
-          <button
-            onClick={() => document.querySelector("[data-payment-queue]")?.scrollIntoView({ behavior: "smooth" })}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
-          >
-            Open payment queue <ArrowUpRight size={15} />
-          </button>
-        </section>
+          <section className="rounded-lg border border-line bg-white shadow-sm">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
+                <AlertTriangle size={18} /> Attendance signals
+              </h2>
+              <p className="mt-0.5 text-sm text-ink/45">Recent misses under this filter.</p>
+            </div>
+            <div className="divide-y divide-line">
+              {summary.risk.slice(0, 5).map((student) => {
+                const missed = missedMap.get(student.id)?.missed ?? 0;
+                const total = missedMap.get(student.id)?.total ?? attendanceDates.length;
+                return (
+                  <div key={student.id} className="px-5 py-3">
+                    <p className="text-sm font-semibold text-ink">{student.name}</p>
+                    <p className="mt-1 text-xs font-semibold text-red-600">{missed}/{total || attendanceDates.length} missed</p>
+                  </div>
+                );
+              })}
+              {summary.risk.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-ink/40">No attendance risk in this filter.</p>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
 
-      <section className="rounded-xl border border-line bg-white shadow-sm">
-        <div className="border-b border-line px-5 py-4">
-          <h3 className="font-display text-lg text-ink">Attendance signals for finance</h3>
-          <p className="mt-0.5 text-sm text-ink/45">Recent missed classes and terminations, scoped by the current teacher/group filter.</p>
-        </div>
-        <div className="divide-y divide-line">
-          {attendanceRisk.map(({ student, missed, total }) => (
-            <div key={student.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_160px_160px] md:items-center">
-              <div>
-                <p className="font-semibold text-ink">{student.name}</p>
-                <p className="mt-1 text-xs text-ink/45">{student.teacher} · {student.klass} · {student.parentName} · {student.parentPhone}</p>
-                {(student.financeNote || student.terminationNote) && (
-                  <p className="mt-2 text-xs font-semibold text-amber-700">{student.terminationNote || student.financeNote}</p>
-                )}
-              </div>
-              <span className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-                {missed}/{total || attendanceDates.length} missed
-              </span>
-              <span className={`rounded-lg px-3 py-2 text-sm font-semibold ${student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "bg-cream text-ink/55"}`}>
-                {student.enrollmentStatus === "terminated" ? "Terminated" : "Watch list"}
-              </span>
-            </div>
-          ))}
-          {attendanceRisk.length === 0 && (
-            <div className="px-5 py-10 text-center text-sm text-ink/40">No attendance finance signals for this filter.</div>
-          )}
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-white shadow-sm">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
         <div className="flex flex-col gap-2 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-display text-lg text-ink">Monthly tuition matrix</h3>
-            <p className="mt-0.5 text-sm text-ink/45">Green paid, yellow partial/sponsor, red unpaid. Every cell is editable.</p>
+            <h2 className="text-lg font-bold text-ink">Monthly tuition matrix</h2>
+            <p className="mt-0.5 text-sm text-ink/45">Secondary editing view for all monthly payment cells.</p>
           </div>
           <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{tuitionMonths.length} program months · July/Aug off</span>
         </div>

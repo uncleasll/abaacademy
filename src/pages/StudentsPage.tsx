@@ -1,29 +1,60 @@
 import { useMemo, useState } from "react";
-import { CheckSquare, Filter, Search } from "lucide-react";
-import { AttendancePill, PaymentPill, SectionTitle, StatusPill } from "../components/ui";
+import { CheckSquare, Filter, Phone, Search, UserRound } from "lucide-react";
+import { AttendancePill, PaymentPill, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
+
+function DirectoryStat({
+  label,
+  value,
+  detail,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "default" | "dark" | "good" | "warn";
+}) {
+  const styles = {
+    default: "border-line bg-white text-ink",
+    dark: "border-green-800 bg-green-900 text-cream",
+    good: "border-emerald-200 bg-emerald-50 text-emerald-950",
+    warn: "border-amber-200 bg-amber-50 text-amber-950",
+  };
+
+  return (
+    <div className={`rounded-lg border p-4 shadow-sm ${styles[tone]}`}>
+      <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+      <p className={`mt-2 text-xs ${tone === "dark" ? "text-cream/65" : "text-ink/50"}`}>{detail}</p>
+    </div>
+  );
+}
 
 export function StudentsPage() {
   const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord } = useAcademy();
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState(students[0]?.id ?? "");
 
-  const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), []);
+  const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), [classGroups]);
   const groupOptions = useMemo(() => {
     if (teacherFilter === "All teachers") return classGroups.map((group) => group.name);
     return classGroups.filter((group) => group.teacher === teacherFilter).map((group) => group.name);
-  }, [teacherFilter]);
+  }, [classGroups, teacherFilter]);
 
   const filtered = students.filter((student) => {
     const matchesTeacher = teacherFilter === "All teachers" || student.teacher === teacherFilter;
     const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
-    const matchesQuery = `${student.name} ${student.parentName} ${student.parentPhone} ${student.address}`
+    const matchesQuery = `${student.name} ${student.parentName} ${student.parentPhone} ${student.address} ${student.klass} ${student.teacher}`
       .toLowerCase()
       .includes(query.toLowerCase());
     return matchesTeacher && matchesGroup && matchesQuery;
   });
   const sorted = [...filtered].sort((a, b) => a.rank - b.rank);
+  const selected = students.find((student) => student.id === selectedId) ?? sorted[0] ?? students[0];
 
   const handleTeacherFilter = (teacher: string) => {
     setTeacherFilter(teacher);
@@ -36,157 +67,217 @@ export function StudentsPage() {
     return map;
   }, [attendanceRecords]);
 
+  const selectedAttendance = attendanceDates.map((date) => ({
+    date,
+    present: selected ? attendanceMap.get(`${selected.id}:${date}`) ?? false : false,
+  }));
+  const missedCount = selectedAttendance.filter((record) => !record.present).length;
+  const overdueCount = students.filter((student) => student.tuitionStatus === "overdue").length;
+  const lowAttendanceCount = students.filter((student) => student.attendancePct < 80 || student.attendance === "absent").length;
+
   const dateLabel = (date: string) => {
     const value = new Date(`${date}T00:00:00`);
     return `${value.getMonth() + 1}/${value.getDate()}/${String(value.getFullYear()).slice(2)}`;
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <SectionTitle eyebrow="IT Admin" title="Students checklist" sub="Teacher/group roster with parent contacts and attendance history like the source sheet." />
-        <div className="rounded-xl border border-line bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm">
-          {sorted.length} of {students.length} students
+    <div className="space-y-5">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_360px] xl:items-start">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-md bg-gold-500/15 px-2.5 py-1 text-xs font-semibold uppercase text-gold-600">
+                IT Admin
+              </span>
+              <span className="rounded-md bg-cream px-2.5 py-1 text-xs font-semibold text-ink/55">
+                {sorted.length} of {students.length} students
+              </span>
+            </div>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Student directory</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">
+              Search families, review parent contact details, and inspect attendance or tuition risk from one profile view.
+            </p>
+          </div>
+          <div className="rounded-lg border border-line bg-cream/45 p-3">
+            <div className="grid gap-2">
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={16} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search student, parent, phone, address"
+                  className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={15} />
+                  <select
+                    value={teacherFilter}
+                    onChange={(event) => handleTeacherFilter(event.target.value)}
+                    className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm font-semibold outline-none focus:border-gold-500"
+                  >
+                    <option>All teachers</option>
+                    {teachers.map((teacher) => (
+                      <option key={teacher}>{teacher}</option>
+                    ))}
+                  </select>
+                </label>
+                <select
+                  value={groupFilter}
+                  onChange={(event) => setGroupFilter(event.target.value)}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+                >
+                  <option>All groups</option>
+                  {groupOptions.map((group) => (
+                    <option key={group}>{group}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
+      </section>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <DirectoryStat label="Students" value={String(students.length)} detail="Total enrolled records" tone="dark" />
+        <DirectoryStat label="Low attendance" value={String(lowAttendanceCount)} detail="Absent or below 80%" tone={lowAttendanceCount ? "warn" : "good"} />
+        <DirectoryStat label="Overdue tuition" value={String(overdueCount)} detail="Needs finance review" tone={overdueCount ? "warn" : "default"} />
+        <DirectoryStat label="Visible" value={String(sorted.length)} detail={`${teacherFilter} · ${groupFilter}`} />
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-line bg-white p-4 shadow-sm lg:grid-cols-[1fr_190px_190px]">
-        <label className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={17} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search student, parent, phone, address"
-            className="w-full rounded-lg border border-line bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-gold-500"
-          />
-        </label>
-        <label className="relative">
-          <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={16} />
-          <select
-            value={teacherFilter}
-            onChange={(e) => handleTeacherFilter(e.target.value)}
-            className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
-          >
-            <option>All teachers</option>
-            {teachers.map((teacher) => (
-              <option key={teacher}>{teacher}</option>
-            ))}
-          </select>
-        </label>
-        <select
-          value={groupFilter}
-          onChange={(e) => setGroupFilter(e.target.value)}
-          className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-        >
-          <option>All groups</option>
-          {groupOptions.map((group) => (
-            <option key={group}>{group}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid gap-3 md:hidden">
-        {sorted.map((student) => (
-          <div key={student.id} className="rounded-xl border border-line bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-ink">{student.name}</p>
-                <p className="mt-1 text-xs text-ink/45">Age {student.age} · {student.address}</p>
-              </div>
-              <StatusPill status={student.status} />
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-cream px-3 py-2">
-                <p className="text-xs font-semibold uppercase text-ink/35">Group</p>
-                <p className="mt-1 font-semibold text-ink">{student.klass}</p>
-              </div>
-              <div className="rounded-lg bg-cream px-3 py-2">
-                <p className="text-xs font-semibold uppercase text-ink/35">Teacher</p>
-                <p className="mt-1 font-semibold text-ink">{student.teacher}</p>
-              </div>
-              <div className="rounded-lg bg-cream px-3 py-2">
-                <p className="text-xs font-semibold uppercase text-ink/35">Attendance</p>
-                <div className="mt-1"><AttendancePill status={student.attendance} /></div>
-              </div>
-              <div className="rounded-lg bg-cream px-3 py-2">
-                <p className="text-xs font-semibold uppercase text-ink/35">Tuition</p>
-                <div className="mt-1"><PaymentPill status={student.tuitionStatus} /></div>
-              </div>
-            </div>
-            <div className="mt-4 border-t border-line pt-3">
-              <p className="text-sm font-medium text-ink/75">{student.parentName}</p>
-              <p className="mt-0.5 text-xs text-ink/45">{student.parentPhone}</p>
-            </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="rounded-lg border border-line bg-white shadow-sm">
+          <div className="border-b border-line px-5 py-4">
+            <h2 className="text-lg font-bold text-ink">Directory</h2>
+            <p className="mt-0.5 text-sm text-ink/45">Select a student to open the profile panel.</p>
           </div>
-        ))}
-        {sorted.length === 0 && (
-          <div className="rounded-xl border border-line bg-white p-8 text-center text-sm text-ink/40">
-            No students match these filters.
-          </div>
-        )}
-      </div>
-
-      <div className="hidden overflow-x-auto rounded-xl border border-line bg-white shadow-sm md:block">
-        <table className="min-w-[1320px] w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-line bg-green-900 text-xs uppercase tracking-wide text-cream/80">
-              <th className="px-5 py-3 font-semibold">#</th>
-              <th className="px-5 py-3 font-semibold">Teacher</th>
-              <th className="px-5 py-3 font-semibold">Group</th>
-              <th className="px-5 py-3 font-semibold">Student</th>
-              <th className="px-5 py-3 font-semibold">Parent</th>
-              <th className="px-5 py-3 font-semibold">Phone</th>
-              {attendanceDates.map((date) => (
-                <th key={date} className="px-3 py-3 text-center font-semibold">{dateLabel(date)}</th>
-              ))}
-              <th className="px-5 py-3 font-semibold">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((s) => (
-              <tr key={s.id} className="border-b border-line last:border-0 transition-colors odd:bg-sky-50/55 even:bg-emerald-50/45 hover:bg-gold-300/20">
-                <td className="px-5 py-3.5 text-ink/40">{s.rank}</td>
-                <td className="px-5 py-3.5 font-medium text-ink/70">{s.teacher}</td>
-                <td className="px-5 py-3.5 text-ink/60">{s.klass}</td>
-                <td className="px-5 py-3.5">
-                  <p className="font-medium text-ink">{s.name}</p>
-                  <p className="text-xs text-ink/45">Age {s.age} · {s.address}</p>
-                </td>
-                <td className="px-5 py-3.5">
-                  <p className="font-medium text-ink/75">{s.parentName}</p>
-                </td>
-                <td className="px-5 py-3.5 text-ink/60">{s.parentPhone}</td>
-                {attendanceDates.map((date) => {
-                  const checked = attendanceMap.get(`${s.id}:${date}`) ?? false;
-                  return (
-                    <td key={date} className="px-3 py-3.5 text-center">
-                      <button
-                        type="button"
-                        onClick={() => void updateAttendanceRecord(s.id, date, !checked)}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
-                          checked ? "border-green-800 bg-green-900 text-white" : "border-ink/35 bg-white text-transparent"
-                        }`}
-                        aria-label={`${checked ? "Mark absent" : "Mark present"} ${s.name} on ${date}`}
-                      >
-                        <CheckSquare size={16} />
-                      </button>
-                    </td>
-                  );
-                })}
-                <td className="px-5 py-3.5">
-                  <StatusPill status={s.status} />
-                </td>
-              </tr>
+          <div className="divide-y divide-line">
+            {sorted.map((student) => (
+              <button
+                key={student.id}
+                type="button"
+                onClick={() => setSelectedId(student.id)}
+                className={`grid w-full gap-4 px-5 py-4 text-left transition md:grid-cols-[1fr_150px_150px] md:items-center ${
+                  selected?.id === student.id ? "bg-gold-300/15" : "hover:bg-cream/50"
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-semibold text-ink">{student.name}</p>
+                    {student.enrollmentStatus === "terminated" && (
+                      <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white">Terminated</span>
+                    )}
+                    {student.attendancePct < 80 && (
+                      <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">Attendance risk</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-ink/45">
+                    Age {student.age} · {student.address}
+                  </p>
+                  <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-ink/60">
+                    <Phone size={12} /> {student.parentName} · {student.parentPhone}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs md:block md:space-y-1">
+                  <p className="font-semibold text-ink">{student.teacher}</p>
+                  <p className="text-ink/45">{student.klass}</p>
+                </div>
+                <div className="flex flex-wrap gap-2 md:justify-end">
+                  <AttendancePill status={student.attendance} />
+                  <PaymentPill status={student.tuitionStatus} />
+                </div>
+              </button>
             ))}
             {sorted.length === 0 && (
-              <tr>
-                <td colSpan={7 + attendanceDates.length} className="px-5 py-10 text-center text-sm text-ink/40">
-                  No students match these filters.
-                </td>
-              </tr>
+              <p className="px-5 py-12 text-center text-sm text-ink/40">No students match these filters.</p>
             )}
-          </tbody>
-        </table>
+          </div>
+        </section>
+
+        <aside className="rounded-lg border border-line bg-white shadow-sm xl:sticky xl:top-5 xl:self-start">
+          {selected ? (
+            <>
+              <div className="border-b border-line px-5 py-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-green-900 text-cream">
+                    <UserRound size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-bold text-ink">{selected.name}</h2>
+                    <p className="mt-1 text-sm text-ink/45">
+                      {selected.teacher} · {selected.klass} · age {selected.age}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <StatusPill status={selected.status} />
+                  <AttendancePill status={selected.attendance} />
+                  <PaymentPill status={selected.tuitionStatus} />
+                  {selected.enrollmentStatus === "terminated" && (
+                    <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Terminated</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <section className="rounded-lg border border-line bg-cream/45 p-3">
+                  <p className="text-xs font-semibold uppercase text-ink/40">Parent contact</p>
+                  <p className="mt-2 text-sm font-semibold text-ink">{selected.parentName}</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink/65">
+                    <Phone size={14} /> {selected.parentPhone}
+                  </p>
+                  <p className="mt-1 text-xs text-ink/45">{selected.address}</p>
+                </section>
+
+                <section className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-line bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-ink/40">Attendance</p>
+                    <p className="mt-2 text-xl font-bold text-ink">{selected.attendancePct}%</p>
+                    <p className="mt-1 text-xs text-ink/45">{missedCount} missed records</p>
+                  </div>
+                  <div className="rounded-lg border border-line bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-ink/40">Tuition due</p>
+                    <p className="mt-2 text-xl font-bold text-ink">${selected.amountDue}</p>
+                    <p className="mt-1 text-xs text-ink/45">{selected.tuitionStatus}</p>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-line bg-white">
+                  <div className="border-b border-line px-3 py-3">
+                    <p className="text-sm font-bold text-ink">Attendance history</p>
+                    <p className="mt-0.5 text-xs text-ink/45">Toggle class attendance records.</p>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 p-3">
+                    {selectedAttendance.map((record) => (
+                      <button
+                        key={record.date}
+                        type="button"
+                        onClick={() => void updateAttendanceRecord(selected.id, record.date, !record.present)}
+                        className={`rounded-lg border px-2 py-2 text-center text-xs font-semibold ${
+                          record.present ? "border-green-800 bg-green-900 text-white" : "border-red-200 bg-red-50 text-red-600"
+                        }`}
+                        aria-label={`${record.present ? "Mark absent" : "Mark present"} ${selected.name} on ${record.date}`}
+                      >
+                        <CheckSquare className="mx-auto mb-1" size={14} />
+                        {dateLabel(record.date)}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {(selected.financeNote || selected.terminationNote) && (
+                  <section className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-xs font-semibold uppercase text-amber-700/70">Finance note</p>
+                    <p className="mt-2 text-sm font-semibold text-amber-900">{selected.terminationNote || selected.financeNote}</p>
+                  </section>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="p-8 text-center text-sm text-ink/40">Select a student to view the profile.</p>
+          )}
+        </aside>
       </div>
     </div>
   );

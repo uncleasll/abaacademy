@@ -1,20 +1,14 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Check, Filter, Phone, Plus, Search, UserRoundPlus } from "lucide-react";
-import { SectionTitle } from "../components/ui";
-import {
-  type AppStatus,
-} from "../data/mockData";
+import { ArrowRight, Phone, Plus, Search, UserRoundPlus, UsersRound } from "lucide-react";
+import { type Application, type AppStatus, classGroups as fallbackClassGroups } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
-import { classGroups as fallbackClassGroups } from "../data/mockData";
 
-const stages: { key: AppStatus | "all"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "New" },
-  { key: "assessment", label: "Assessment" },
-  { key: "interview", label: "Interview" },
-  { key: "teacher_review", label: "Teacher review" },
-  { key: "accepted", label: "Accepted" },
-  { key: "rejected", label: "Rejected" },
+const pipelineStages: { key: AppStatus; label: string; empty: string }[] = [
+  { key: "pending", label: "New", empty: "No new families" },
+  { key: "assessment", label: "Assessment", empty: "No assessments pending" },
+  { key: "interview", label: "Interview", empty: "No interviews pending" },
+  { key: "teacher_review", label: "Teacher Review", empty: "No teacher decisions pending" },
+  { key: "accepted", label: "Accepted", empty: "No accepted applicants" },
 ];
 
 const nextStatus: Partial<Record<AppStatus, AppStatus>> = {
@@ -22,6 +16,13 @@ const nextStatus: Partial<Record<AppStatus, AppStatus>> = {
   assessment: "interview",
   interview: "teacher_review",
   teacher_review: "accepted",
+};
+
+const actionLabel: Partial<Record<AppStatus, string>> = {
+  pending: "Send to assessment",
+  assessment: "Schedule interview",
+  interview: "Request teacher review",
+  teacher_review: "Mark accepted",
 };
 
 const emptyForm = {
@@ -43,7 +44,7 @@ const emptyForm = {
   klass: fallbackClassGroups[0]?.name ?? "",
 };
 
-function IntakeMetric({
+function IntakeStat({
   label,
   value,
   detail,
@@ -62,7 +63,7 @@ function IntakeMetric({
   };
 
   return (
-    <div className={`rounded-xl border p-4 shadow-sm ${styles[tone]}`}>
+    <div className={`rounded-lg border p-4 shadow-sm ${styles[tone]}`}>
       <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
         {label}
       </p>
@@ -78,18 +79,20 @@ function Field({
   onChange,
   placeholder,
   type = "text",
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   type?: string;
+  required?: boolean;
 }) {
   return (
     <label className="space-y-1.5 text-xs font-semibold text-ink/55">
       {label}
       <input
-        required
+        required={required}
         type={type}
         min={type === "number" ? 3 : undefined}
         max={type === "number" ? 18 : undefined}
@@ -102,15 +105,75 @@ function Field({
   );
 }
 
+function ApplicantCard({
+  app,
+  onAdvance,
+  onReject,
+}: {
+  app: Application;
+  onAdvance: (app: Application) => void;
+  onReject: (app: Application) => void;
+}) {
+  return (
+    <article className="rounded-lg border border-line bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-ink">{app.name}</p>
+          <p className="mt-1 text-xs text-ink/45">Age {app.age} · {app.program}</p>
+        </div>
+        <span className="rounded-full bg-gold-500/15 px-2.5 py-1 text-[11px] font-semibold text-gold-600">
+          {app.status.replace("_", " ")}
+        </span>
+      </div>
+      <p className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-ink/60">
+        <Phone size={12} /> {app.parentName} {app.parentSurname} · {app.phone}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-md bg-cream px-2.5 py-2">
+          <p className="font-semibold text-ink/40">Teacher</p>
+          <p className="mt-0.5 font-semibold text-ink">{app.teacher}</p>
+        </div>
+        <div className="rounded-md bg-cream px-2.5 py-2">
+          <p className="font-semibold text-ink/40">Group</p>
+          <p className="mt-0.5 font-semibold text-ink">{app.klass}</p>
+        </div>
+      </div>
+      {app.status === "teacher_review" && (
+        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          Waiting for teacher to accept or decline.
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {nextStatus[app.status] && (
+          <button
+            type="button"
+            onClick={() => onAdvance(app)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+          >
+            {actionLabel[app.status]} <ArrowRight size={13} />
+          </button>
+        )}
+        {app.status !== "accepted" && app.status !== "rejected" && (
+          <button
+            type="button"
+            onClick={() => onReject(app)}
+            className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
+          >
+            Reject
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export function ApplicationsPage() {
   const { applications: apps, classGroups, createApplication, students, updateApplicationStatus } = useAcademy();
   const [form, setForm] = useState(emptyForm);
-  const [stageFilter, setStageFilter] = useState<AppStatus | "all">("all");
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
-  const [notice, setNotice] = useState("Admissions workspace is ready.");
-  const [reviewed, setReviewed] = useState<string[]>([]);
+  const [notice, setNotice] = useState("Admissions pipeline is ready.");
 
   const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), [classGroups]);
   const groupOptions = useMemo(
@@ -123,15 +186,17 @@ export function ApplicationsPage() {
   }, [classGroups, teacherFilter]);
 
   const visibleApps = apps.filter((app) => {
-    const matchesStage = stageFilter === "all" || app.status === stageFilter;
     const matchesTeacher = teacherFilter === "All teachers" || app.teacher === teacherFilter;
     const matchesGroup = groupFilter === "All groups" || app.klass === groupFilter;
     const matchesQuery = `${app.name} ${app.parentName} ${app.parentSurname} ${app.phone} ${app.address} ${app.klass}`
       .toLowerCase()
       .includes(query.toLowerCase());
-    return matchesStage && matchesTeacher && matchesGroup && matchesQuery;
+    return matchesTeacher && matchesGroup && matchesQuery;
   });
-
+  const rejectedApps = visibleApps.filter((app) => app.status === "rejected");
+  const lookupRows = students
+    .filter((student) => `${student.name} ${student.parentName} ${student.parentPhone} ${student.teacher} ${student.klass}`.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 6);
   const selectedGroup = classGroups.find((group) => group.name === form.klass);
   const updateForm = (patch: Partial<typeof form>) => setForm((prev) => ({ ...prev, ...patch }));
 
@@ -158,15 +223,14 @@ export function ApplicationsPage() {
     setGroupFilter("All groups");
   };
 
-  const advance = (id: string, name: string) => {
-    const app = apps.find((item) => item.id === id);
-    if (app && nextStatus[app.status]) void updateApplicationStatus(id, nextStatus[app.status]!);
-    setNotice(`${name} moved to the next admissions stage.`);
+  const advance = (app: Application) => {
+    if (nextStatus[app.status]) void updateApplicationStatus(app.id, nextStatus[app.status]!);
+    setNotice(`${app.name}: ${actionLabel[app.status] ?? "Moved forward"}.`);
   };
 
-  const reject = (id: string, name: string) => {
-    void updateApplicationStatus(id, "rejected");
-    setNotice(`${name} marked as rejected.`);
+  const reject = (app: Application) => {
+    void updateApplicationStatus(app.id, "rejected");
+    setNotice(`${app.name} marked as rejected.`);
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -194,255 +258,233 @@ export function ApplicationsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <SectionTitle
-          eyebrow="Registration"
-          title="Admissions workspace"
-          sub="Register families, assign teacher/group placement, and move applicants through the intake pipeline."
-        />
-        <button
-          onClick={() => setNotice("New intake form is ready on the left.")}
-          className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
-        >
-          <UserRoundPlus size={16} /> New intake
-        </button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <IntakeMetric label="Total applicants" value={String(apps.length)} detail="All active records" tone="dark" />
-        <IntakeMetric label="New" value={String(apps.filter((app) => app.status === "pending").length)} detail="Needs first contact" tone="warn" />
-        <IntakeMetric label="In process" value={String(apps.filter((app) => app.status === "assessment" || app.status === "interview").length)} detail="Assessment or interview" />
-        <IntakeMetric label="Accepted" value={String(apps.filter((app) => app.status === "accepted").length)} detail="Ready for enrollment" tone="good" />
-      </div>
-
-      <section className="rounded-xl border border-line bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_180px]">
+    <div className="space-y-5">
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_380px] xl:items-start">
           <div>
-            <h3 className="font-display text-lg text-ink">Student lookup</h3>
-            <p className="mt-0.5 text-sm text-ink/45">Quick parent contact lookup by student, group, teacher, or phone.</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-md bg-gold-500/15 px-2.5 py-1 text-xs font-semibold uppercase text-gold-600">
+                Registration
+              </span>
+              <span className="rounded-md bg-cream px-2.5 py-1 text-xs font-semibold text-ink/55">
+                {visibleApps.length} visible applicants
+              </span>
+            </div>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Admissions pipeline</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">
+              Move each family from intake to assessment, interview, teacher review, and final acceptance.
+            </p>
           </div>
-          <span className="rounded-lg bg-cream px-3 py-2 text-center text-xs font-semibold text-ink/50">
-            {students.length} total students
-          </span>
-        </div>
-        <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-          {students
-            .filter((student) => `${student.name} ${student.parentName} ${student.parentPhone} ${student.teacher} ${student.klass}`.toLowerCase().includes(query.toLowerCase()))
-            .slice(0, 8)
-            .map((student) => (
-              <div key={student.id} className="rounded-lg border border-line bg-cream/40 p-3">
-                <p className="truncate text-sm font-semibold text-ink">{student.name}</p>
-                <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.teacher}</p>
-                <p className="mt-2 text-xs font-semibold text-ink/70">{student.parentName} · {student.parentPhone}</p>
-              </div>
-            ))}
-        </div>
-      </section>
-
-      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
-
-      <div className="grid gap-5 xl:grid-cols-[400px_1fr]">
-        <section className="rounded-xl border border-line bg-white p-5 shadow-sm">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-900 text-cream">
-              <UserRoundPlus size={19} />
-            </div>
-            <div>
-              <h3 className="font-display text-lg text-ink">Family intake</h3>
-              <p className="text-sm text-ink/45">Required student and parent details</p>
-            </div>
-          </div>
-
-          <form onSubmit={submit} className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr_88px]">
-              <Field label="Child full name" value={form.name} onChange={(name) => updateForm({ name })} placeholder="Ali Valiyev" />
-              <Field label="Age" type="number" value={form.age} onChange={(age) => updateForm({ age })} placeholder="8" />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Parent first name" value={form.parentName} onChange={(parentName) => updateForm({ parentName })} placeholder="Parent first name" />
-              <Field label="Parent last name" value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
-            </div>
-            <Field label="Main phone number" value={form.phone} onChange={(phone) => updateForm({ phone })} placeholder="(718) 555-0199" />
-            <Field label="Parent Telegram" value={form.parentTelegram} onChange={(parentTelegram) => updateForm({ parentTelegram })} placeholder="@parent_username" />
-            <div className="rounded-xl border border-line bg-cream/50 p-3">
-              <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Emergency contact 1</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Name" value={form.emergencyContact1Name} onChange={(emergencyContact1Name) => updateForm({ emergencyContact1Name })} placeholder="Contact name" />
-                <Field label="Phone" value={form.emergencyContact1Phone} onChange={(emergencyContact1Phone) => updateForm({ emergencyContact1Phone })} placeholder="(718) 555-0101" />
-              </div>
-              <div className="mt-3">
-                <Field label="Relation" value={form.emergencyContact1Relation} onChange={(emergencyContact1Relation) => updateForm({ emergencyContact1Relation })} placeholder="Mother, uncle, family friend" />
-              </div>
-            </div>
-            <div className="rounded-xl border border-line bg-cream/50 p-3">
-              <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Emergency contact 2</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Name" value={form.emergencyContact2Name} onChange={(emergencyContact2Name) => updateForm({ emergencyContact2Name })} placeholder="Contact name" />
-                <Field label="Phone" value={form.emergencyContact2Phone} onChange={(emergencyContact2Phone) => updateForm({ emergencyContact2Phone })} placeholder="(718) 555-0102" />
-              </div>
-              <div className="mt-3">
-                <Field label="Relation" value={form.emergencyContact2Relation} onChange={(emergencyContact2Relation) => updateForm({ emergencyContact2Relation })} placeholder="Aunt, grandfather, neighbor" />
-              </div>
-            </div>
-            <Field label="Home address" value={form.address} onChange={(address) => updateForm({ address })} placeholder="Brooklyn, NY 11219" />
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1.5 text-xs font-semibold text-ink/55">
-                Teacher
+          <div className="rounded-lg border border-line bg-cream/45 p-3">
+            <div className="grid gap-2">
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={16} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search child, parent, phone, group"
+                  className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
                 <select
-                  value={form.teacher}
-                  onChange={(event) => handleTeacherChange(event.target.value)}
-                  className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
+                  value={teacherFilter}
+                  onChange={(event) => handleTeacherFilter(event.target.value)}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
                 >
+                  <option>All teachers</option>
                   {teachers.map((teacher) => (
                     <option key={teacher}>{teacher}</option>
                   ))}
                 </select>
-              </label>
-              <label className="space-y-1.5 text-xs font-semibold text-ink/55">
-                Group
                 <select
-                  value={form.klass}
-                  onChange={(event) => handleGroupChange(event.target.value)}
-                  className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
+                  value={groupFilter}
+                  onChange={(event) => setGroupFilter(event.target.value)}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
                 >
-                  {groupOptions.map((group) => (
+                  <option>All groups</option>
+                  {filteredGroupOptions.map((group) => (
                     <option key={group}>{group}</option>
                   ))}
                 </select>
-              </label>
+              </div>
+            </div>
+            <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <IntakeStat label="New" value={String(apps.filter((app) => app.status === "pending").length)} detail="Needs first contact" tone="dark" />
+        <IntakeStat label="Assessment" value={String(apps.filter((app) => app.status === "assessment").length)} detail="Ready to schedule" />
+        <IntakeStat label="Interview" value={String(apps.filter((app) => app.status === "interview").length)} detail="Family decision stage" />
+        <IntakeStat label="Teacher review" value={String(apps.filter((app) => app.status === "teacher_review").length)} detail="Waiting on teacher" tone="warn" />
+        <IntakeStat label="Accepted" value={String(apps.filter((app) => app.status === "accepted").length)} detail="Ready for enrollment" tone="good" />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+        <div className="space-y-5">
+          <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-900 text-cream">
+                <UserRoundPlus size={19} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-ink">Family intake</h2>
+                <p className="text-sm text-ink/45">Student, parent, placement</p>
+              </div>
             </div>
 
-            {selectedGroup && (
-              <div className="rounded-xl border border-line bg-cream/60 p-3 text-sm text-ink/65">
-                <p className="font-semibold text-ink">{selectedGroup.name} · {selectedGroup.schedule}</p>
-                <p className="mt-1">
-                  {selectedGroup.enrolled}/{selectedGroup.capacity} seats · {selectedGroup.program}
-                </p>
+            <form onSubmit={submit} className="space-y-4">
+              <div className="rounded-lg border border-line bg-cream/45 p-3">
+                <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Student</p>
+                <div className="grid gap-3 sm:grid-cols-[1fr_88px]">
+                  <Field label="Child full name" value={form.name} onChange={(name) => updateForm({ name })} placeholder="Ali Valiyev" />
+                  <Field label="Age" type="number" value={form.age} onChange={(age) => updateForm({ age })} placeholder="8" />
+                </div>
+                <div className="mt-3">
+                  <Field label="Home address" value={form.address} onChange={(address) => updateForm({ address })} placeholder="Brooklyn, NY 11219" />
+                </div>
               </div>
-            )}
 
-            <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-3 text-sm font-semibold text-cream hover:bg-green-800">
-              <Plus size={17} /> Register and assign
-            </button>
-          </form>
-        </section>
+              <div className="rounded-lg border border-line bg-cream/45 p-3">
+                <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Parent</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="First name" value={form.parentName} onChange={(parentName) => updateForm({ parentName })} placeholder="Parent first name" />
+                  <Field label="Last name" value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Field label="Phone" value={form.phone} onChange={(phone) => updateForm({ phone })} placeholder="(718) 555-0199" />
+                  <Field label="Telegram" value={form.parentTelegram} onChange={(parentTelegram) => updateForm({ parentTelegram })} placeholder="@parent" required={false} />
+                </div>
+              </div>
 
-        <section className="rounded-xl border border-line bg-white shadow-sm">
-          <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_170px_170px]">
-            <label className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={17} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search child, parent, phone, address"
-                className="w-full rounded-lg border border-line bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-gold-500"
-              />
-            </label>
-            <label className="relative">
-              <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={16} />
-              <select
-                value={teacherFilter}
-                onChange={(event) => handleTeacherFilter(event.target.value)}
-                className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
-              >
-                <option>All teachers</option>
-                {teachers.map((teacher) => (
-                  <option key={teacher}>{teacher}</option>
-                ))}
-              </select>
-            </label>
-            <select
-              value={groupFilter}
-              onChange={(event) => setGroupFilter(event.target.value)}
-              className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-            >
-              <option>All groups</option>
-              {filteredGroupOptions.map((group) => (
-                <option key={group}>{group}</option>
-              ))}
-            </select>
-          </div>
+              <details className="rounded-lg border border-line bg-white p-3">
+                <summary className="cursor-pointer text-xs font-semibold uppercase text-ink/45">Emergency contacts</summary>
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Contact 1" value={form.emergencyContact1Name} onChange={(emergencyContact1Name) => updateForm({ emergencyContact1Name })} placeholder="Name" required={false} />
+                    <Field label="Phone" value={form.emergencyContact1Phone} onChange={(emergencyContact1Phone) => updateForm({ emergencyContact1Phone })} placeholder="Phone" required={false} />
+                  </div>
+                  <Field label="Relation" value={form.emergencyContact1Relation} onChange={(emergencyContact1Relation) => updateForm({ emergencyContact1Relation })} placeholder="Mother, uncle" required={false} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Contact 2" value={form.emergencyContact2Name} onChange={(emergencyContact2Name) => updateForm({ emergencyContact2Name })} placeholder="Name" required={false} />
+                    <Field label="Phone" value={form.emergencyContact2Phone} onChange={(emergencyContact2Phone) => updateForm({ emergencyContact2Phone })} placeholder="Phone" required={false} />
+                  </div>
+                  <Field label="Relation" value={form.emergencyContact2Relation} onChange={(emergencyContact2Relation) => updateForm({ emergencyContact2Relation })} placeholder="Aunt, neighbor" required={false} />
+                </div>
+              </details>
 
-          <div className="flex flex-wrap gap-2 border-b border-line px-4 py-3">
-            {stages.map((stage) => (
-              <button
-                key={stage.key}
-                onClick={() => setStageFilter(stage.key)}
-                className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                  stageFilter === stage.key
-                    ? "bg-green-900 text-cream"
-                    : "border border-line bg-white text-ink/60 hover:border-gold-500 hover:text-gold-600"
-                }`}
-              >
-                {stage.label}
+              <div className="rounded-lg border border-line bg-cream/45 p-3">
+                <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Placement</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-xs font-semibold text-ink/55">
+                    Teacher
+                    <select
+                      value={form.teacher}
+                      onChange={(event) => handleTeacherChange(event.target.value)}
+                      className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
+                    >
+                      {teachers.map((teacher) => (
+                        <option key={teacher}>{teacher}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1.5 text-xs font-semibold text-ink/55">
+                    Group
+                    <select
+                      value={form.klass}
+                      onChange={(event) => handleGroupChange(event.target.value)}
+                      className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
+                    >
+                      {groupOptions.map((group) => (
+                        <option key={group}>{group}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {selectedGroup && (
+                  <div className="mt-3 rounded-lg border border-line bg-white p-3 text-sm text-ink/65">
+                    <p className="font-semibold text-ink">{selectedGroup.name} · {selectedGroup.schedule}</p>
+                    <p className="mt-1">
+                      {selectedGroup.enrolled}/{selectedGroup.capacity} seats · {selectedGroup.program}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-3 text-sm font-semibold text-cream hover:bg-green-800">
+                <Plus size={17} /> Register and assign
               </button>
-            ))}
-          </div>
+            </form>
+          </section>
 
-          <div className="divide-y divide-line">
-            {visibleApps.map((app) => (
-              <div key={app.id} className="grid gap-4 px-5 py-4 xl:grid-cols-[1fr_190px_180px] xl:items-center">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-ink">{app.name}</p>
-                    <span className="rounded-full bg-gold-500/15 px-2.5 py-1 text-xs font-semibold text-gold-600">
-                      {app.status}
-                    </span>
-                    {reviewed.includes(app.id) && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                        <Check size={12} /> Reviewed
-                      </span>
+          <section className="rounded-lg border border-line bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <div>
+                <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
+                  <UsersRound size={18} /> Student lookup
+                </h2>
+                <p className="mt-0.5 text-sm text-ink/45">Quick parent contacts</p>
+              </div>
+              <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{students.length}</span>
+            </div>
+            <div className="divide-y divide-line">
+              {lookupRows.map((student) => (
+                <div key={student.id} className="px-5 py-3">
+                  <p className="truncate text-sm font-semibold text-ink">{student.name}</p>
+                  <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.teacher}</p>
+                  <p className="mt-1 text-xs font-semibold text-ink/70">{student.parentName} · {student.parentPhone}</p>
+                </div>
+              ))}
+              {lookupRows.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-ink/40">No students match this search.</p>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <section className="rounded-lg border border-line bg-white shadow-sm">
+          <div className="border-b border-line px-5 py-4">
+            <h2 className="text-lg font-bold text-ink">Pipeline board</h2>
+            <p className="mt-0.5 text-sm text-ink/45">Each column shows the next operational step.</p>
+          </div>
+          <div className="grid gap-3 p-4 xl:grid-cols-5">
+            {pipelineStages.map((stage) => {
+              const stageApps = visibleApps.filter((app) => app.status === stage.key);
+              return (
+                <div key={stage.key} className="min-w-0 rounded-lg border border-line bg-cream/45">
+                  <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-3">
+                    <p className="text-sm font-bold text-ink">{stage.label}</p>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-ink/50">{stageApps.length}</span>
+                  </div>
+                  <div className="space-y-3 p-3">
+                    {stageApps.map((app) => (
+                      <ApplicantCard key={app.id} app={app} onAdvance={advance} onReject={reject} />
+                    ))}
+                    {stageApps.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-line bg-white/60 px-3 py-8 text-center text-xs font-semibold text-ink/35">
+                        {stage.empty}
+                      </p>
                     )}
                   </div>
-                  <p className="mt-1 text-sm text-ink/50">
-                    Age {app.age} · {app.program} · {app.klass} with {app.teacher}
-                  </p>
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-ink/45">
-                    <Phone size={12} /> {app.phone} · {app.parentName} {app.parentSurname}
-                  </p>
-                  <p className="mt-0.5 text-xs text-ink/35">{app.address}</p>
                 </div>
-                <div className="rounded-xl bg-cream/60 px-3 py-2 text-sm text-ink/60">
-                  <p className="font-semibold text-ink">{app.klass}</p>
-                  <p className="mt-0.5 text-xs">{app.submitted}</p>
-                </div>
-                <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
-                  <button
-                    onClick={() => {
-                      setReviewed((prev) => (prev.includes(app.id) ? prev : [...prev, app.id]));
-                      setNotice(`${app.name}'s intake reviewed.`);
-                    }}
-                    className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
-                  >
-                    Review
-                  </button>
-                  {nextStatus[app.status] && (
-                    <button
-                      onClick={() => advance(app.id, app.name)}
-                      className="rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
-                    >
-                      Next stage
-                    </button>
-                  )}
-                  {app.status !== "accepted" && app.status !== "rejected" && (
-                    <button
-                      onClick={() => reject(app.id, app.name)}
-                      className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
-                    >
-                      Reject
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {visibleApps.length === 0 && (
-              <div className="px-5 py-12 text-center text-sm text-ink/40">
-                No applicants match this view.
-              </div>
-            )}
+              );
+            })}
           </div>
+          {rejectedApps.length > 0 && (
+            <div className="border-t border-line px-5 py-4">
+              <p className="mb-3 text-xs font-semibold uppercase text-ink/40">Rejected</p>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {rejectedApps.map((app) => (
+                  <div key={app.id} className="rounded-lg border border-line bg-white p-3">
+                    <p className="text-sm font-semibold text-ink">{app.name}</p>
+                    <p className="mt-1 text-xs text-ink/45">{app.parentName} {app.parentSurname} · {app.phone}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </div>
