@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CheckSquare, Save, Search, Star, UserX } from "lucide-react";
+import { Check, CheckSquare, Save, Search, Star, UserCheck, UserX } from "lucide-react";
 import { AttendancePill, HwPill, SectionTitle } from "../components/ui";
 import { type AttendanceStatus, type HwStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
@@ -46,16 +46,19 @@ function TeacherMetric({
 }
 
 export function TeacherRoster() {
-  const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord, updateStudent } = useAcademy();
-  const [rows, setRows] = useState(students.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
+  const { applications, attendanceDates, attendanceRecords, classGroups, students, updateApplicationStatus, updateAttendanceRecord, updateStudent, user } = useAcademy();
+  const teacherName = user?.name.split(" ")[0] ?? "";
+  const teacherStudents = students.filter((student) => student.teacher === teacherName);
+  const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
+  const [rows, setRows] = useState(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState(true);
   const [notice, setNotice] = useState("Roster is ready for today's attendance and homework updates.");
 
   useEffect(() => {
-    setRows(students.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
-  }, [students]);
+    setRows(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
+  }, [students, teacherName]);
 
   const visibleRows = rows.filter((row) => {
     const matchesGroup = groupFilter === "All groups" || row.klass === groupFilter;
@@ -64,6 +67,7 @@ export function TeacherRoster() {
       .includes(query.toLowerCase());
     return matchesGroup && matchesQuery;
   });
+  const incomingApplicants = applications.filter((app) => app.teacher === teacherName && app.status === "teacher_review");
 
   const metrics = useMemo(() => {
     const present = visibleRows.filter((row) => row.attendance === "present").length;
@@ -136,6 +140,52 @@ export function TeacherRoster() {
 
       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
 
+      {incomingApplicants.length > 0 && (
+        <section className="rounded-xl border border-line bg-white shadow-sm">
+          <div className="border-b border-line px-5 py-4">
+            <h3 className="font-display text-lg text-ink">Incoming students</h3>
+            <p className="mt-0.5 text-sm text-ink/45">Registration assigned these applicants for teacher acceptance.</p>
+          </div>
+          <div className="divide-y divide-line">
+            {incomingApplicants.map((app) => (
+              <div key={app.id} className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_220px] md:items-center">
+                <div>
+                  <p className="font-semibold text-ink">{app.name}</p>
+                  <p className="mt-1 text-xs text-ink/45">
+                    Age {app.age} · {app.klass} · {app.program}
+                  </p>
+                  <p className="mt-1 text-xs text-ink/45">
+                    {app.parentName} {app.parentSurname} · {app.phone}
+                  </p>
+                </div>
+                <div className="flex gap-2 md:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void updateApplicationStatus(app.id, "accepted");
+                      setNotice(`${app.name} accepted for ${app.klass}.`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+                  >
+                    <UserCheck size={14} /> Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void updateApplicationStatus(app.id, "rejected");
+                      setNotice(`${app.name} declined by teacher.`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
+                  >
+                    <UserX size={14} /> Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-xl border border-line bg-white shadow-sm">
         <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_210px]">
           <label className="relative">
@@ -153,7 +203,7 @@ export function TeacherRoster() {
             className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
           >
             <option>All groups</option>
-            {classGroups.map((group) => (
+            {teacherGroups.map((group) => (
               <option key={group.id}>{group.name}</option>
             ))}
           </select>

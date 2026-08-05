@@ -22,7 +22,10 @@ const emptyScores = {
 };
 
 export function AssessmentsPage() {
-  const { assessmentRecords, classGroups, students, updateAssessmentRecord } = useAcademy();
+  const { assessmentRecords, classGroups, students, updateAssessmentRecord, user } = useAcademy();
+  const teacherName = user?.name.split(" ")[0] ?? "";
+  const teacherStudents = students.filter((student) => student.teacher === teacherName);
+  const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
   const [quarter, setQuarter] = useState<QuarterKey>("Q1");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
@@ -36,7 +39,7 @@ export function AssessmentsPage() {
     return map;
   }, [assessmentRecords, quarter]);
 
-  const rows = students.filter((student) => {
+  const rows = teacherStudents.filter((student) => {
     const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
     const matchesQuery = `${student.name} ${student.parentName} ${student.klass}`.toLowerCase().includes(query.toLowerCase());
     return matchesGroup && matchesQuery;
@@ -110,7 +113,7 @@ export function AssessmentsPage() {
             className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
           >
             <option>All groups</option>
-            {classGroups.map((group) => (
+            {teacherGroups.map((group) => (
               <option key={group.id}>{group.name}</option>
             ))}
           </select>

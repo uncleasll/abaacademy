@@ -4,7 +4,6 @@ import {
   Users,
   Wallet,
   ClipboardList,
-  Send,
   UserCog,
   FileCheck2,
   CalendarClock,
@@ -33,7 +32,6 @@ export const navByRole: Record<Role, NavItem[]> = {
   Teacher: [
     { key: "roster", label: "My Class", icon: ClipboardList },
     { key: "assessments", label: "Assessments", icon: FileCheck2 },
-    { key: "report", label: "Send Report", icon: Send },
   ],
   Registration: [
     { key: "applications", label: "Applications", icon: FileCheck2 },

@@ -12,6 +12,7 @@ const stages: { key: AppStatus | "all"; label: string }[] = [
   { key: "pending", label: "New" },
   { key: "assessment", label: "Assessment" },
   { key: "interview", label: "Interview" },
+  { key: "teacher_review", label: "Teacher review" },
   { key: "accepted", label: "Accepted" },
   { key: "rejected", label: "Rejected" },
 ];
@@ -19,7 +20,8 @@ const stages: { key: AppStatus | "all"; label: string }[] = [
 const nextStatus: Partial<Record<AppStatus, AppStatus>> = {
   pending: "assessment",
   assessment: "interview",
-  interview: "accepted",
+  interview: "teacher_review",
+  teacher_review: "accepted",
 };
 
 const emptyForm = {
@@ -101,7 +103,7 @@ function Field({
 }
 
 export function ApplicationsPage() {
-  const { applications: apps, classGroups, createApplication, updateApplicationStatus } = useAcademy();
+  const { applications: apps, classGroups, createApplication, students, updateApplicationStatus } = useAcademy();
   const [form, setForm] = useState(emptyForm);
   const [stageFilter, setStageFilter] = useState<AppStatus | "all">("all");
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
@@ -110,15 +112,15 @@ export function ApplicationsPage() {
   const [notice, setNotice] = useState("Admissions workspace is ready.");
   const [reviewed, setReviewed] = useState<string[]>([]);
 
-  const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), []);
+  const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), [classGroups]);
   const groupOptions = useMemo(
     () => classGroups.filter((group) => group.teacher === form.teacher).map((group) => group.name),
-    [form.teacher]
+    [classGroups, form.teacher]
   );
   const filteredGroupOptions = useMemo(() => {
     if (teacherFilter === "All teachers") return classGroups.map((group) => group.name);
     return classGroups.filter((group) => group.teacher === teacherFilter).map((group) => group.name);
-  }, [teacherFilter]);
+  }, [classGroups, teacherFilter]);
 
   const visibleApps = apps.filter((app) => {
     const matchesStage = stageFilter === "all" || app.status === stageFilter;
@@ -213,6 +215,30 @@ export function ApplicationsPage() {
         <IntakeMetric label="In process" value={String(apps.filter((app) => app.status === "assessment" || app.status === "interview").length)} detail="Assessment or interview" />
         <IntakeMetric label="Accepted" value={String(apps.filter((app) => app.status === "accepted").length)} detail="Ready for enrollment" tone="good" />
       </div>
+
+      <section className="rounded-xl border border-line bg-white shadow-sm">
+        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_180px]">
+          <div>
+            <h3 className="font-display text-lg text-ink">Student lookup</h3>
+            <p className="mt-0.5 text-sm text-ink/45">Quick parent contact lookup by student, group, teacher, or phone.</p>
+          </div>
+          <span className="rounded-lg bg-cream px-3 py-2 text-center text-xs font-semibold text-ink/50">
+            {students.length} total students
+          </span>
+        </div>
+        <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+          {students
+            .filter((student) => `${student.name} ${student.parentName} ${student.parentPhone} ${student.teacher} ${student.klass}`.toLowerCase().includes(query.toLowerCase()))
+            .slice(0, 8)
+            .map((student) => (
+              <div key={student.id} className="rounded-lg border border-line bg-cream/40 p-3">
+                <p className="truncate text-sm font-semibold text-ink">{student.name}</p>
+                <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.teacher}</p>
+                <p className="mt-2 text-xs font-semibold text-ink/70">{student.parentName} · {student.parentPhone}</p>
+              </div>
+            ))}
+        </div>
+      </section>
 
       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
 

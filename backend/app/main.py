@@ -225,6 +225,10 @@ def require_roles(*roles: str):
     return dependency
 
 
+def teacher_alias(user: dict) -> str:
+    return user["name"].split(" ")[0]
+
+
 @app.post("/api/auth/login")
 def login(payload: LoginRequest):
     with connect() as conn:
@@ -262,25 +266,45 @@ def logout(user=Depends(get_current_user)):
 @app.get("/api/bootstrap")
 def bootstrap(user=Depends(get_current_user)):
     with connect() as conn:
-        students = [student_row(row) for row in conn.execute("SELECT * FROM students ORDER BY rank").fetchall()]
+        if user["role"] == "Teacher":
+            alias = teacher_alias(user)
+            students = [student_row(row) for row in conn.execute("SELECT * FROM students WHERE teacher = ? ORDER BY rank", (alias,)).fetchall()]
+            applications = [
+                application_row(row)
+                for row in conn.execute(
+                    "SELECT * FROM applications WHERE teacher = ? AND status = 'teacher_review' ORDER BY submitted DESC, id DESC",
+                    (alias,),
+                ).fetchall()
+            ]
+            groups = [group_row(row) for row in conn.execute("SELECT * FROM class_groups WHERE teacher = ? ORDER BY name", (alias,)).fetchall()]
+        else:
+            students = [student_row(row) for row in conn.execute("SELECT * FROM students ORDER BY rank").fetchall()]
+            applications = [
+                application_row(row)
+                for row in conn.execute("SELECT * FROM applications ORDER BY submitted DESC, id DESC").fetchall()
+            ]
+            groups = [group_row(row) for row in conn.execute("SELECT * FROM class_groups ORDER BY name").fetchall()]
         applications = [
-            application_row(row)
-            for row in conn.execute("SELECT * FROM applications ORDER BY submitted DESC, id DESC").fetchall()
+            app
+            for app in applications
         ]
-        groups = [group_row(row) for row in conn.execute("SELECT * FROM class_groups ORDER BY name").fetchall()]
         users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall()]
         meetings = [meeting_row(row) for row in conn.execute("SELECT * FROM meetings ORDER BY day, time").fetchall()]
+        student_ids = {student["id"] for student in students}
         attendance_records = [
             attendance_row(row)
             for row in conn.execute("SELECT * FROM attendance_records ORDER BY date, student_id").fetchall()
+            if row["student_id"] in student_ids
         ]
         tuition_records = [
             tuition_row(row)
             for row in conn.execute("SELECT * FROM tuition_records ORDER BY student_id, month").fetchall()
+            if row["student_id"] in student_ids
         ]
         assessment_records = [
             assessment_row(row)
             for row in conn.execute("SELECT * FROM assessment_records ORDER BY quarter, student_id").fetchall()
+            if row["student_id"] in student_ids
         ]
     return {
         "students": students,
@@ -313,9 +337,11 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
     if not updates:
         raise HTTPException(status_code=400, detail="No updates supplied")
     with connect() as conn:
-        exists = conn.execute("SELECT id FROM students WHERE id = ?", (student_id,)).fetchone()
+        exists = conn.execute("SELECT id, teacher FROM students WHERE id = ?", (student_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Student not found")
+        if user["role"] == "Teacher" and exists["teacher"] != teacher_alias(user):
+            raise HTTPException(status_code=403, detail="Teachers can update only their own students")
         assignments = ", ".join(f"{allowed[key]} = ?" for key in updates)
         values = [updates[key] for key in updates]
         conn.execute(f"UPDATE students SET {assignments} WHERE id = ?", (*values, student_id))
@@ -327,9 +353,11 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
 @app.put("/api/attendance")
 def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(require_roles("IT Admin", "Teacher"))):
     with connect() as conn:
-        exists = conn.execute("SELECT id FROM students WHERE id = ?", (payload.studentId,)).fetchone()
+        exists = conn.execute("SELECT id, teacher FROM students WHERE id = ?", (payload.studentId,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Student not found")
+        if user["role"] == "Teacher" and exists["teacher"] != teacher_alias(user):
+            raise HTTPException(status_code=403, detail="Teachers can update only their own students")
         conn.execute(
             """
             INSERT INTO attendance_records (student_id, date, present)
@@ -363,9 +391,11 @@ def update_tuition_record(payload: TuitionRecordPatch, user=Depends(require_role
 @app.put("/api/assessments")
 def update_assessment_record(payload: AssessmentRecordPatch, user=Depends(require_roles("IT Admin", "Teacher"))):
     with connect() as conn:
-        exists = conn.execute("SELECT id FROM students WHERE id = ?", (payload.studentId,)).fetchone()
+        exists = conn.execute("SELECT id, teacher FROM students WHERE id = ?", (payload.studentId,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Student not found")
+        if user["role"] == "Teacher" and exists["teacher"] != teacher_alias(user):
+            raise HTTPException(status_code=403, detail="Teachers can update only their own students")
         conn.execute(
             """
             INSERT INTO assessment_records
@@ -435,11 +465,14 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
 
 
 @app.patch("/api/applications/{application_id}/status")
-def update_application_status(application_id: str, payload: StatusPatch, user=Depends(require_roles("IT Admin", "Registration"))):
+def update_application_status(application_id: str, payload: StatusPatch, user=Depends(require_roles("IT Admin", "Registration", "Teacher"))):
     with connect() as conn:
-        exists = conn.execute("SELECT id FROM applications WHERE id = ?", (application_id,)).fetchone()
+        exists = conn.execute("SELECT id, teacher, status FROM applications WHERE id = ?", (application_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Application not found")
+        if user["role"] == "Teacher":
+            if exists["teacher"] != teacher_alias(user) or exists["status"] != "teacher_review" or payload.status not in {"accepted", "rejected"}:
+                raise HTTPException(status_code=403, detail="Teachers can only accept or reject their assigned review applicants")
         conn.execute("UPDATE applications SET status = ? WHERE id = ?", (payload.status, application_id))
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
     audit("application.status_updated", {"applicationId": application_id, "status": payload.status, "actorId": user["id"]})

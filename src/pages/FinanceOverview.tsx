@@ -69,6 +69,8 @@ const paymentStatusOptions: { key: PaymentStatus | "all"; label: string }[] = [
 export function FinanceOverview() {
   const {
     students,
+    attendanceDates,
+    attendanceRecords,
     tuitionMonths,
     tuitionRecords,
     queueReminder,
@@ -82,17 +84,43 @@ export function FinanceOverview() {
   const [workingAction, setWorkingAction] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | "all">("all");
+  const [monthFilter, setMonthFilter] = useState(tuitionMonths[tuitionMonths.length - 1] ?? "June");
+  const [teacherFilter, setTeacherFilter] = useState("All teachers");
+  const [groupFilter, setGroupFilter] = useState("All groups");
+
+  const teachers = useMemo(() => Array.from(new Set(students.map((student) => student.teacher))), [students]);
+  const groupOptions = useMemo(() => {
+    if (teacherFilter === "All teachers") return Array.from(new Set(students.map((student) => student.klass)));
+    return Array.from(new Set(students.filter((student) => student.teacher === teacherFilter).map((student) => student.klass)));
+  }, [students, teacherFilter]);
+  const scopedStudents = useMemo(
+    () =>
+      students.filter((student) => {
+        const matchesTeacher = teacherFilter === "All teachers" || student.teacher === teacherFilter;
+        const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
+        return matchesTeacher && matchesGroup;
+      }),
+    [groupFilter, students, teacherFilter]
+  );
+  const tuitionMap = useMemo(() => {
+    const map = new Map<string, (typeof tuitionRecords)[number]>();
+    tuitionRecords.forEach((record) => map.set(`${record.studentId}:${record.month}`, record));
+    return map;
+  }, [tuitionRecords]);
 
   const summary = useMemo(() => {
-    const overdue = students.filter((student) => student.tuitionStatus === "overdue");
-    const pending = students.filter((student) => student.tuitionStatus === "unpaid");
-    const paid = students.filter((student) => student.tuitionStatus === "paid");
-    const financeFlags = students.filter((student) => student.attendance === "absent" || student.enrollmentStatus === "terminated" || student.financeNote);
-    const totalDue = students.reduce((sum, student) => sum + student.amountDue, 0);
-    const collectible = totalDue + paid.length * 450;
-    const collectionRate = collectible ? Math.round(((paid.length * 450) / collectible) * 100) : 0;
+    const monthStatus = (studentId: string) => tuitionMap.get(`${studentId}:${monthFilter}`)?.status ?? "unpaid";
+    const monthAmount = (studentId: string) => tuitionMap.get(`${studentId}:${monthFilter}`)?.amount ?? 0;
+    const overdue = scopedStudents.filter((student) => student.tuitionStatus === "overdue" && monthStatus(student.id) !== "paid");
+    const pending = scopedStudents.filter((student) => monthStatus(student.id) === "unpaid" && student.tuitionStatus !== "overdue");
+    const paid = scopedStudents.filter((student) => monthStatus(student.id) === "paid");
+    const financeFlags = scopedStudents.filter((student) => student.attendance === "absent" || student.enrollmentStatus === "terminated" || student.financeNote);
+    const totalDue = scopedStudents.reduce((sum, student) => sum + (monthStatus(student.id) === "paid" ? 0 : student.amountDue || 450 - monthAmount(student.id)), 0);
+    const collected = scopedStudents.reduce((sum, student) => sum + monthAmount(student.id), 0);
+    const collectible = totalDue + collected;
+    const collectionRate = collectible ? Math.round((collected / collectible) * 100) : 0;
     return { overdue, pending, paid, financeFlags, totalDue, collectionRate };
-  }, [students]);
+  }, [monthFilter, scopedStudents, tuitionMap]);
 
   const queue = [...summary.overdue, ...summary.pending]
     .filter((student) => {
@@ -103,13 +131,24 @@ export function FinanceOverview() {
       return matchesStatus && matchesQuery;
     })
     .sort((a, b) => b.amountDue - a.amountDue);
-  const collectedEstimate = summary.paid.length * 450;
-  const highestDue = Math.max(...students.map((student) => student.amountDue), 1);
-  const tuitionMap = useMemo(() => {
-    const map = new Map<string, (typeof tuitionRecords)[number]>();
-    tuitionRecords.forEach((record) => map.set(`${record.studentId}:${record.month}`, record));
-    return map;
-  }, [tuitionRecords]);
+  const collectedEstimate = scopedStudents.reduce((sum, student) => sum + (tuitionMap.get(`${student.id}:${monthFilter}`)?.amount ?? 0), 0);
+  const highestDue = Math.max(...scopedStudents.map((student) => student.amountDue), 1);
+  const attendanceRisk = useMemo(
+    () =>
+      scopedStudents
+        .map((student) => {
+          const recent = attendanceDates
+            .slice(-12)
+            .map((date) => attendanceRecords.find((record) => record.studentId === student.id && record.date === date))
+            .filter(Boolean);
+          const missed = recent.filter((record) => !record!.present).length;
+          return { student, missed, total: recent.length };
+        })
+        .filter((item) => item.missed > 0 || item.student.enrollmentStatus === "terminated")
+        .sort((a, b) => b.missed - a.missed)
+        .slice(0, 6),
+    [attendanceDates, attendanceRecords, scopedStudents]
+  );
 
   const paymentCellClass: Record<MonthlyPaymentStatus, string> = {
     paid: "bg-emerald-400/90 text-emerald-950",
@@ -175,9 +214,44 @@ export function FinanceOverview() {
 
       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
 
+      <div className="grid gap-3 rounded-xl border border-line bg-white p-4 shadow-sm lg:grid-cols-3">
+        <select
+          value={monthFilter}
+          onChange={(event) => setMonthFilter(event.target.value)}
+          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+        >
+          {tuitionMonths.map((month) => (
+            <option key={month}>{month}</option>
+          ))}
+        </select>
+        <select
+          value={teacherFilter}
+          onChange={(event) => {
+            setTeacherFilter(event.target.value);
+            setGroupFilter("All groups");
+          }}
+          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+        >
+          <option>All teachers</option>
+          {teachers.map((teacher) => (
+            <option key={teacher}>{teacher}</option>
+          ))}
+        </select>
+        <select
+          value={groupFilter}
+          onChange={(event) => setGroupFilter(event.target.value)}
+          className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+        >
+          <option>All groups</option>
+          {groupOptions.map((group) => (
+            <option key={group}>{group}</option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <FinanceMetric label="Outstanding" value={usd.format(summary.totalDue)} detail={`${summary.overdue.length + summary.pending.length} families need follow-up`} icon={Wallet} tone="dark" />
-        <FinanceMetric label="Collected" value={usd.format(collectedEstimate)} detail={`${summary.collectionRate}% collection rate estimate`} icon={TrendingUp} tone="good" />
+        <FinanceMetric label="Outstanding" value={usd.format(summary.totalDue)} detail={`${monthFilter}: ${summary.overdue.length + summary.pending.length} families need follow-up`} icon={Wallet} tone="dark" />
+        <FinanceMetric label="Collected" value={usd.format(collectedEstimate)} detail={`${summary.collectionRate}% collection rate for filter`} icon={TrendingUp} tone="good" />
         <FinanceMetric label="Overdue" value={String(summary.overdue.length)} detail="Prioritize these today" icon={Bell} tone="warn" />
         <FinanceMetric label="Flags" value={String(summary.financeFlags.length)} detail="Absent, notes, or terminated" icon={ReceiptText} />
       </div>
@@ -288,9 +362,9 @@ export function FinanceOverview() {
           </div>
           <div className="mt-5 space-y-5">
             {[
-              { label: "Paid families", value: summary.paid.length, total: students.length, color: "bg-emerald-500" },
-              { label: "Pending families", value: summary.pending.length, total: students.length, color: "bg-amber-400" },
-              { label: "Overdue families", value: summary.overdue.length, total: students.length, color: "bg-red-500" },
+              { label: "Paid families", value: summary.paid.length, total: scopedStudents.length || 1, color: "bg-emerald-500" },
+              { label: "Pending families", value: summary.pending.length, total: scopedStudents.length || 1, color: "bg-amber-400" },
+              { label: "Overdue families", value: summary.overdue.length, total: scopedStudents.length || 1, color: "bg-red-500" },
             ].map((item) => {
               const pct = Math.round((item.value / item.total) * 100);
               return (
@@ -358,6 +432,35 @@ export function FinanceOverview() {
       </div>
 
       <section className="rounded-xl border border-line bg-white shadow-sm">
+        <div className="border-b border-line px-5 py-4">
+          <h3 className="font-display text-lg text-ink">Attendance signals for finance</h3>
+          <p className="mt-0.5 text-sm text-ink/45">Recent missed classes and terminations, scoped by the current teacher/group filter.</p>
+        </div>
+        <div className="divide-y divide-line">
+          {attendanceRisk.map(({ student, missed, total }) => (
+            <div key={student.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_160px_160px] md:items-center">
+              <div>
+                <p className="font-semibold text-ink">{student.name}</p>
+                <p className="mt-1 text-xs text-ink/45">{student.teacher} · {student.klass} · {student.parentName} · {student.parentPhone}</p>
+                {(student.financeNote || student.terminationNote) && (
+                  <p className="mt-2 text-xs font-semibold text-amber-700">{student.terminationNote || student.financeNote}</p>
+                )}
+              </div>
+              <span className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+                {missed}/{total || attendanceDates.length} missed
+              </span>
+              <span className={`rounded-lg px-3 py-2 text-sm font-semibold ${student.enrollmentStatus === "terminated" ? "bg-red-600 text-white" : "bg-cream text-ink/55"}`}>
+                {student.enrollmentStatus === "terminated" ? "Terminated" : "Watch list"}
+              </span>
+            </div>
+          ))}
+          {attendanceRisk.length === 0 && (
+            <div className="px-5 py-10 text-center text-sm text-ink/40">No attendance finance signals for this filter.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-white shadow-sm">
         <div className="flex flex-col gap-2 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-display text-lg text-ink">Monthly tuition matrix</h3>
@@ -380,7 +483,7 @@ export function FinanceOverview() {
               </tr>
             </thead>
             <tbody>
-              {students.map((student) => (
+              {scopedStudents.map((student) => (
                 <tr key={student.id} className="border-b border-line last:border-0 odd:bg-cream/30 hover:bg-gold-300/15">
                   <td className="sticky left-0 bg-white px-4 py-3 font-semibold text-ink shadow-[1px_0_0_rgba(15,23,32,0.08)]">{student.name}</td>
                   <td className="px-4 py-3 font-medium text-ink/65">{student.teacher}</td>
@@ -420,6 +523,13 @@ export function FinanceOverview() {
                   })}
                 </tr>
               ))}
+              {scopedStudents.length === 0 && (
+                <tr>
+                  <td colSpan={5 + tuitionMonths.length} className="px-5 py-10 text-center text-sm text-ink/40">
+                    No students match this finance filter.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

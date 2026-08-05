@@ -2,7 +2,7 @@ export type AttendanceStatus = "present" | "late" | "absent";
 export type HwStatus = "done" | "partial" | "not_done";
 export type PaymentStatus = "paid" | "unpaid" | "overdue";
 export type MonthlyPaymentStatus = "paid" | "partial" | "unpaid" | "sponsor" | "voucher" | "absent";
-export type AppStatus = "pending" | "assessment" | "interview" | "accepted" | "rejected";
+export type AppStatus = "pending" | "assessment" | "interview" | "teacher_review" | "accepted" | "rejected";
 export type EnrollmentStatus = "active" | "paused" | "terminated";
 export type QuarterKey = "Q1" | "Q2" | "Q3" | "Final";
 
