@@ -54,11 +54,23 @@ function OpsStat({
 }
 
 export function AdminOverview() {
-  const { applications, classGroups, staffUsers, students } = useAcademy();
+  const { applications, attendanceDates, attendanceRecords, classGroups, staffUsers, students } = useAcademy();
   const [notice, setNotice] = useState("Operations exceptions are current.");
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
 
   const operations = useMemo(() => {
+    const missedStats = students
+      .map((student) => {
+        const recent = attendanceDates
+          .slice(-12)
+          .map((date) => attendanceRecords.find((record) => record.studentId === student.id && record.date === date))
+          .filter(Boolean);
+        const missed = recent.filter((record) => !record!.present).length;
+        const escalation = missed >= 5 ? "Terminate review" : missed >= 3 ? "Parent warning" : missed >= 1 ? "Watch" : "Clear";
+        return { student, missed, total: recent.length || attendanceDates.length, escalation };
+      })
+      .filter((item) => item.missed > 0)
+      .sort((a, b) => b.missed - a.missed);
     const teacherReview = applications.filter((app) => app.status === "teacher_review");
     const openApplications = applications.filter((app) => app.status !== "accepted" && app.status !== "rejected");
     const overdue = students.filter((student) => student.tuitionStatus === "overdue");
@@ -90,12 +102,12 @@ export function AdminOverview() {
         owner: "Finance",
         tone: "warn" as const,
       })),
-      ...lowAttendance.slice(0, 5).map((student) => ({
+      ...missedStats.slice(0, 5).map(({ student, missed, total, escalation }) => ({
         id: `attendance-${student.id}`,
-        title: `${student.name} attendance needs follow-up`,
-        detail: `${student.attendancePct}% attendance · ${student.teacher} · ${student.parentPhone}`,
+        title: `${student.name} missed ${missed} classes`,
+        detail: `${missed}/${total} missed · ${escalation} · ${student.teacher} · ${student.parentPhone}`,
         owner: "Teacher",
-        tone: "warn" as const,
+        tone: missed >= 5 ? "bad" as const : "warn" as const,
       })),
       ...inactiveUsers.map((user) => ({
         id: `user-${user.id}`,
@@ -112,8 +124,8 @@ export function AdminOverview() {
         tone: "default" as const,
       })),
     ];
-    return { teacherReview, openApplications, overdue, terminated, lowAttendance, inactiveUsers, capacityWarnings, outstanding, activeUsers, exceptions };
-  }, [applications, classGroups, staffUsers, students]);
+    return { teacherReview, openApplications, overdue, terminated, lowAttendance, inactiveUsers, capacityWarnings, outstanding, activeUsers, exceptions, missedStats };
+  }, [applications, attendanceDates, attendanceRecords, classGroups, staffUsers, students]);
 
   const visibleExceptions = operations.exceptions.filter((item) => !acknowledged.includes(item.id)).slice(0, 10);
 
@@ -213,6 +225,34 @@ export function AdminOverview() {
         </section>
 
         <div className="space-y-5">
+          <section className="rounded-lg border border-line bg-white shadow-sm">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
+                <ClipboardList size={18} /> Missed classes dashboard
+              </h2>
+              <p className="mt-0.5 text-sm text-ink/45">Last 12 class records from teacher attendance.</p>
+            </div>
+            <div className="divide-y divide-line">
+              {operations.missedStats.slice(0, 6).map(({ student, missed, total, escalation }) => (
+                <div key={student.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_110px] sm:items-center">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{student.name}</p>
+                    <p className="mt-1 text-xs text-ink/45">{student.teacher} · {student.klass} · {student.parentPhone}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className={missed >= 5 ? "text-sm font-bold text-red-600" : "text-sm font-bold text-amber-700"}>
+                      {missed}/{total}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-ink/45">{escalation}</p>
+                  </div>
+                </div>
+              ))}
+              {operations.missedStats.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-ink/40">No missed class records.</p>
+              )}
+            </div>
+          </section>
+
           <section className="rounded-lg border border-line bg-white shadow-sm">
             <div className="border-b border-line px-5 py-4">
               <h2 className="flex items-center gap-2 text-lg font-bold text-ink">

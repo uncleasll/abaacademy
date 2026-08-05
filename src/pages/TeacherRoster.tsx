@@ -4,8 +4,10 @@ import {
   CalendarDays,
   Check,
   ClipboardCheck,
+  Copy,
   Save,
   Search,
+  Send,
   Star,
   UserCheck,
   UserX,
@@ -61,6 +63,7 @@ export function TeacherRoster() {
     applications,
     attendanceDates,
     classGroups,
+    queueReminder,
     students,
     updateApplicationStatus,
     updateAttendanceRecord,
@@ -121,6 +124,24 @@ export function TeacherRoster() {
     saved: "Saved",
   }[sessionState];
 
+  const tgMessage = useMemo(() => {
+    const title = `${activeGroup?.name ?? groupFilter} | Daily attendance form | ${sessionDate}`;
+    const lines = visibleRows.map((student, index) => {
+      const attendance = student.attendance === "present" ? "Present" : student.attendance === "late" ? "Late" : "Absent";
+      const homework = student.hw === "done" ? "HW done" : student.hw === "partial" ? "HW partial" : "HW not done";
+      return `${index + 1}. ${student.name}
+   ${attendance} | ${homework} | ${student.stars}/5
+   Next: ${student.nextHwDraft || "-"}`;
+    });
+    return `${title}
+Teacher: ${teacherName}
+
+${lines.join("\n\n")}
+
+Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} absent.
+Demo bot preview only.`;
+  }, [activeGroup?.name, groupFilter, metrics.absent, metrics.late, metrics.present, sessionDate, teacherName, visibleRows]);
+
   const update = (id: string, patch: Partial<(typeof rows)[number]>) => {
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
     setSaved(false);
@@ -157,6 +178,23 @@ export function TeacherRoster() {
   const startSession = () => {
     setSessionState("in_progress");
     setNotice(`${activeGroup?.name ?? "Class"} session started. Take attendance first.`);
+  };
+
+  const copyTgMessage = async () => {
+    await navigator.clipboard?.writeText(tgMessage);
+    setNotice("Daily TG form copied.");
+  };
+
+  const queueDemoBot = () => {
+    void queueReminder({
+      type: "teacher-daily-tg-demo",
+      teacher: teacherName,
+      group: groupFilter,
+      date: sessionDate,
+      message: tgMessage,
+      studentCount: visibleRows.length,
+    });
+    setNotice("Demo Telegram bot message queued.");
   };
 
   return (
@@ -228,6 +266,34 @@ export function TeacherRoster() {
         <SessionStat label="Homework issues" value={String(metrics.incompleteHw)} detail="Partial or not done" tone={metrics.incompleteHw ? "warn" : "default"} />
         <SessionStat label="Incoming" value={String(incomingApplicants.length)} detail="Teacher decisions" />
       </div>
+
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-4 border-b border-line px-5 py-4 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <h2 className="text-lg font-bold text-ink">Daily TG bot form demo</h2>
+            <p className="mt-0.5 text-sm text-ink/45">Preview the message that the Telegram bot would send for this class session.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={copyTgMessage}
+              className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+            >
+              <Copy size={14} /> Copy TG form
+            </button>
+            <button
+              type="button"
+              onClick={queueDemoBot}
+              className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+            >
+              <Send size={14} /> Queue demo bot
+            </button>
+          </div>
+        </div>
+        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap p-5 font-mono text-xs leading-relaxed text-ink/70">
+          {tgMessage}
+        </pre>
+      </section>
 
       {(incomingApplicants.length > 0 || metrics.needsAttention.length > 0) && (
         <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
