@@ -425,96 +425,87 @@ Demo bot preview only.`;
           </div>
         </div>
 
-        <div className="grid gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="divide-y divide-line">
           {visibleRows.map((student) => (
-            <article
+            <div
               key={student.id}
-              className={`rounded-lg border p-4 shadow-sm ${
+              className={`px-4 py-3 ${
                 student.attendance === "absent"
-                  ? "border-red-200 bg-red-50/60"
+                  ? "bg-red-50/60"
                   : student.hw === "not_done"
-                    ? "border-amber-200 bg-amber-50/55"
-                    : "border-line bg-white"
+                    ? "bg-amber-50/55"
+                    : "bg-white"
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_250px_190px_120px] xl:items-center">
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-ink">{student.name}</p>
-                  <p className="mt-1 text-xs text-ink/45">
-                    {student.klass} · {student.parentPhone}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-semibold text-ink">{student.name}</p>
+                    <AttendancePill status={student.attendance} />
+                    {student.enrollmentStatus === "terminated" && (
+                      <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Terminated</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.parentPhone}</p>
                 </div>
-                <AttendancePill status={student.attendance} />
-              </div>
 
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {attendanceOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => update(student.id, { attendance: option.value })}
-                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${
-                      student.attendance === option.value
-                        ? "bg-green-900 text-cream"
-                        : "border border-line bg-white text-ink/55 hover:border-gold-500 hover:text-gold-600"
-                    }`}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {attendanceOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => update(student.id, { attendance: option.value })}
+                      className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${
+                        student.attendance === option.value
+                          ? "bg-green-900 text-cream"
+                          : "border border-line bg-white text-ink/55 hover:border-gold-500 hover:text-gold-600"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={student.hw}
+                    onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
+                    className="rounded-lg border border-line bg-white px-2.5 py-2 text-xs font-semibold text-ink outline-none focus:border-gold-500"
                   >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-cream/45 px-3 py-2">
-                <div className="flex flex-wrap gap-2">
-                  <HwPill status={student.hw} />
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-ink/55">{student.stars}/5 rating</span>
+                    {hwOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex h-[34px] items-center gap-0.5 rounded-lg border border-line bg-white px-2">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => update(student.id, { stars: index + 1 })}
+                        className="inline-flex h-7 w-5 items-center justify-center"
+                      >
+                        <Star
+                          size={14}
+                          className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
+                        />
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
                 <button
                   type="button"
                   onClick={() => toggleExpanded(student.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
                 >
                   Details <ChevronDown size={14} />
                 </button>
               </div>
 
               {expandedRows.includes(student.id) && (
-                <div className="mt-4 space-y-4 border-t border-line pt-4">
-                  <div className="grid gap-3 sm:grid-cols-[1fr_150px]">
-                    <label className="space-y-1.5 text-xs font-semibold uppercase text-ink/40">
-                      Homework
-                      <select
-                        value={student.hw}
-                        onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
-                        className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold normal-case text-ink outline-none focus:border-gold-500"
-                      >
-                        {hwOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div>
-                      <p className="mb-2 text-xs font-semibold uppercase text-ink/40">Rating</p>
-                      <div className="flex h-[38px] items-center gap-0.5 rounded-lg border border-line bg-white px-2">
-                        {Array.from({ length: 5 }).map((_, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => update(student.id, { stars: index + 1 })}
-                            className="inline-flex h-8 w-6 items-center justify-center"
-                          >
-                            <Star
-                              size={17}
-                              className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
+                <div className="mt-3 grid gap-3 rounded-lg border border-line bg-white p-3 lg:grid-cols-[1fr_360px]">
                   <label className="block space-y-1.5 text-xs font-semibold uppercase text-ink/40">
                     Next assignment
                     <input
@@ -558,10 +549,10 @@ Demo bot preview only.`;
                   </div>
                 </div>
               )}
-            </article>
+            </div>
           ))}
           {visibleRows.length === 0 && (
-            <div className="col-span-full px-5 py-12 text-center text-sm text-ink/40">No students match this view.</div>
+            <div className="px-5 py-12 text-center text-sm text-ink/40">No students match this view.</div>
           )}
         </div>
       </section>
