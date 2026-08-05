@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CalendarDays,
   Check,
+  ChevronDown,
   ClipboardCheck,
   Copy,
   Save,
@@ -86,6 +87,7 @@ export function TeacherRoster() {
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState(true);
   const [sessionState, setSessionState] = useState<"not_started" | "in_progress" | "saved">("not_started");
+  const [expandedRows, setExpandedRows] = useState<string[]>([]);
   const [notice, setNotice] = useState("Select a group and start today's class session.");
 
   useEffect(() => {
@@ -197,6 +199,17 @@ Demo bot preview only.`;
     setNotice("Demo Telegram bot message queued.");
   };
 
+  const toggleExpanded = (id: string) => {
+    setExpandedRows((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const steps = [
+    { label: "Start", active: sessionState !== "not_started" },
+    { label: "Attendance", active: sessionState === "in_progress" || sessionState === "saved" },
+    { label: "Save", active: sessionState === "saved" },
+    { label: "TG demo", active: sessionState === "saved" },
+  ];
+
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-line bg-white shadow-sm">
@@ -227,6 +240,18 @@ Demo bot preview only.`;
                 <p className="text-xs font-semibold uppercase text-ink/40">Schedule</p>
                 <p className="mt-1 truncate text-sm font-semibold text-ink">{activeGroup?.schedule ?? "Class schedule"}</p>
               </div>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-4">
+              {steps.map((step, index) => (
+                <div
+                  key={step.label}
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                    step.active ? "border-green-800 bg-green-900 text-cream" : "border-line bg-cream/45 text-ink/45"
+                  }`}
+                >
+                  {index + 1}. {step.label}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -267,33 +292,34 @@ Demo bot preview only.`;
         <SessionStat label="Incoming" value={String(incomingApplicants.length)} detail="Teacher decisions" />
       </div>
 
-      <section className="rounded-lg border border-line bg-white shadow-sm">
-        <div className="grid gap-4 border-b border-line px-5 py-4 lg:grid-cols-[1fr_auto] lg:items-center">
+      <details className="rounded-lg border border-line bg-white shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
           <div>
             <h2 className="text-lg font-bold text-ink">Daily TG bot form demo</h2>
-            <p className="mt-0.5 text-sm text-ink/45">Preview the message that the Telegram bot would send for this class session.</p>
+            <p className="mt-0.5 text-sm text-ink/45">Preview and queue the demo bot message after saving class.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={copyTgMessage}
-              className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
-            >
-              <Copy size={14} /> Copy TG form
-            </button>
-            <button
-              type="button"
-              onClick={queueDemoBot}
-              className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
-            >
-              <Send size={14} /> Queue demo bot
-            </button>
-          </div>
+          <ChevronDown size={18} className="text-ink/45" />
+        </summary>
+        <div className="flex flex-wrap gap-2 border-t border-line px-5 py-4">
+          <button
+            type="button"
+            onClick={copyTgMessage}
+            className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+          >
+            <Copy size={14} /> Copy TG form
+          </button>
+          <button
+            type="button"
+            onClick={queueDemoBot}
+            className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+          >
+            <Send size={14} /> Queue demo bot
+          </button>
         </div>
-        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap p-5 font-mono text-xs leading-relaxed text-ink/70">
+        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-line p-5 font-mono text-xs leading-relaxed text-ink/70">
           {tgMessage}
         </pre>
-      </section>
+      </details>
 
       {(incomingApplicants.length > 0 || metrics.needsAttention.length > 0) && (
         <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
@@ -438,82 +464,100 @@ Demo bot preview only.`;
                 ))}
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_150px]">
-                <label className="space-y-1.5 text-xs font-semibold uppercase text-ink/40">
-                  Homework
-                  <select
-                    value={student.hw}
-                    onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
-                    className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold normal-case text-ink outline-none focus:border-gold-500"
-                  >
-                    {hwOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase text-ink/40">Rating</p>
-                  <div className="flex h-[38px] items-center gap-0.5 rounded-lg border border-line bg-white px-2">
-                    {Array.from({ length: 5 }).map((_, index) => (
-                      <button
-                        key={index}
-                        type="button"
-                        onClick={() => update(student.id, { stars: index + 1 })}
-                        className="inline-flex h-8 w-6 items-center justify-center"
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-cream/45 px-3 py-2">
+                <div className="flex flex-wrap gap-2">
+                  <HwPill status={student.hw} />
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-ink/55">{student.stars}/5 rating</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(student.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                >
+                  Details <ChevronDown size={14} />
+                </button>
+              </div>
+
+              {expandedRows.includes(student.id) && (
+                <div className="mt-4 space-y-4 border-t border-line pt-4">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_150px]">
+                    <label className="space-y-1.5 text-xs font-semibold uppercase text-ink/40">
+                      Homework
+                      <select
+                        value={student.hw}
+                        onChange={(event) => update(student.id, { hw: event.target.value as HwStatus })}
+                        className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold normal-case text-ink outline-none focus:border-gold-500"
                       >
-                        <Star
-                          size={17}
-                          className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
-                        />
+                        {hwOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-ink/40">Rating</p>
+                      <div className="flex h-[38px] items-center gap-0.5 rounded-lg border border-line bg-white px-2">
+                        {Array.from({ length: 5 }).map((_, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => update(student.id, { stars: index + 1 })}
+                            className="inline-flex h-8 w-6 items-center justify-center"
+                          >
+                            <Star
+                              size={17}
+                              className={index < student.stars ? "fill-amber-400 text-amber-400" : "text-line"}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="block space-y-1.5 text-xs font-semibold uppercase text-ink/40">
+                    Next assignment
+                    <input
+                      value={student.nextHwDraft}
+                      onChange={(event) => update(student.id, { nextHwDraft: event.target.value })}
+                      className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium normal-case text-ink outline-none focus:border-gold-500"
+                    />
+                  </label>
+
+                  <div className="rounded-lg border border-line bg-cream/45 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase text-ink/40">Enrollment / finance</p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update(student.id, {
+                            enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
+                            terminationNote:
+                              student.enrollmentStatus === "terminated"
+                                ? ""
+                                : student.terminationNote || "Teacher marked terminated. Finance review needed.",
+                            financeNote:
+                              student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
+                          })
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${
+                          student.enrollmentStatus === "terminated"
+                            ? "bg-red-600 text-white"
+                            : "border border-line bg-white text-ink/55 hover:border-red-200 hover:text-red-600"
+                        }`}
+                      >
+                        <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
                       </button>
-                    ))}
+                    </div>
+                    <input
+                      value={student.terminationNote ?? student.financeNote ?? ""}
+                      onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
+                      placeholder="Optional note visible to finance"
+                      className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
+                    />
                   </div>
                 </div>
-              </div>
-
-              <label className="mt-4 block space-y-1.5 text-xs font-semibold uppercase text-ink/40">
-                Next assignment
-                <input
-                  value={student.nextHwDraft}
-                  onChange={(event) => update(student.id, { nextHwDraft: event.target.value })}
-                  className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium normal-case text-ink outline-none focus:border-gold-500"
-                />
-              </label>
-
-              <div className="mt-4 rounded-lg border border-line bg-cream/45 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      update(student.id, {
-                        enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
-                        terminationNote:
-                          student.enrollmentStatus === "terminated"
-                            ? ""
-                            : student.terminationNote || "Teacher marked terminated. Finance review needed.",
-                        financeNote:
-                          student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
-                      })
-                    }
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${
-                      student.enrollmentStatus === "terminated"
-                        ? "bg-red-600 text-white"
-                        : "border border-line bg-white text-ink/55 hover:border-red-200 hover:text-red-600"
-                    }`}
-                  >
-                    <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
-                  </button>
-                  <HwPill status={student.hw} />
-                </div>
-                <input
-                  value={student.terminationNote ?? student.financeNote ?? ""}
-                  onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
-                  placeholder="Optional note visible to finance"
-                  className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
-                />
-              </div>
+              )}
             </article>
           ))}
           {visibleRows.length === 0 && (
