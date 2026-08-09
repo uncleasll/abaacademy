@@ -65,6 +65,7 @@ interface AcademyStore extends BootstrapData {
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
   createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser>;
   updateUserStatus: (id: string, status: StaffUser["status"]) => Promise<StaffUser | undefined>;
+  deleteUser: (id: string) => Promise<void>;
   createMeeting: (payload: Omit<Meeting, "id">) => Promise<Meeting>;
   deleteMeeting: (id: string) => Promise<void>;
   queueReminder: (payload: Record<string, unknown>) => Promise<void>;
@@ -242,16 +243,30 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     };
 
     const updateAttendanceRecord: AcademyStore["updateAttendanceRecord"] = async (studentId, date, present) => {
-      setData((prev) => ({
-        ...prev,
-        attendanceRecords: [
+      const recalculateStudentAttendance = (prev: BootstrapData) => {
+        const records = [
           ...prev.attendanceRecords.filter((record) => record.studentId !== studentId || record.date !== date),
           { studentId, date, present },
-        ],
+        ];
+        const studentRecords = records.filter((record) => record.studentId === studentId);
+        const presentCount = studentRecords.filter((record) => record.present).length;
+        const attendancePct = studentRecords.length ? Math.round((presentCount / studentRecords.length) * 100) : 0;
+        const attendance: Student["attendance"] = present ? "present" : "absent";
+        return {
+          ...prev,
+          attendanceRecords: records,
+          students: prev.students.map((student) =>
+            student.id === studentId ? { ...student, attendancePct, attendance } : student
+          ),
+        };
+      };
+      setData((prev) => ({
+        ...recalculateStudentAttendance(prev),
       }));
       try {
         await request("/api/attendance", { method: "PUT", body: JSON.stringify({ studentId, date, present }) });
         setApiOnline(true);
+        await refresh();
       } catch {
         setApiOnline(false);
       }
@@ -329,6 +344,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
           ...prev,
           applications: prev.applications.map((app) => (app.id === id ? updated : app)),
         }));
+        if (status === "accepted") await refresh();
         return updated;
       } catch {
         setApiOnline(false);
@@ -375,6 +391,18 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
         return updated;
       } catch {
         setApiOnline(false);
+      }
+    };
+
+    const deleteUser: AcademyStore["deleteUser"] = async (id) => {
+      const previousUsers = data.staffUsers;
+      setData((prev) => ({ ...prev, staffUsers: prev.staffUsers.filter((user) => user.id !== id) }));
+      try {
+        await request<void>(`/api/users/${id}`, { method: "DELETE" });
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+        setData((prev) => ({ ...prev, staffUsers: previousUsers }));
       }
     };
 
@@ -482,6 +510,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       updateApplicationStatus,
       createUser,
       updateUserStatus,
+      deleteUser,
       createMeeting,
       deleteMeeting,
       queueReminder,

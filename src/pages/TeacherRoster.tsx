@@ -29,6 +29,21 @@ const hwOptions: { value: HwStatus; label: string }[] = [
   { value: "not_done", label: "Not Done" },
 ];
 
+function todayInputValue() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isNewStudent(joinedDate?: string) {
+  if (!joinedDate) return false;
+  const joined = new Date(`${joinedDate}T00:00:00`);
+  const now = new Date();
+  return now.getTime() - joined.getTime() <= 1000 * 60 * 60 * 24 * 14;
+}
+
 function SessionStat({
   label,
   value,
@@ -62,7 +77,6 @@ function SessionStat({
 export function TeacherRoster() {
   const {
     applications,
-    attendanceDates,
     classGroups,
     queueReminder,
     students,
@@ -80,10 +94,9 @@ export function TeacherRoster() {
     () => classGroups.filter((group) => group.teacher === teacherName),
     [classGroups, teacherName]
   );
-  const sessionDate = attendanceDates[attendanceDates.length - 1] ?? new Date().toISOString().slice(0, 10);
-
   const [rows, setRows] = useState(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
   const [groupFilter, setGroupFilter] = useState(teacherGroups[0]?.name ?? "All groups");
+  const [sessionDate, setSessionDate] = useState(todayInputValue);
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState(true);
   const [sessionState, setSessionState] = useState<"not_started" | "in_progress" | "saved">("not_started");
@@ -174,7 +187,7 @@ Demo bot preview only.`;
     });
     setSaved(true);
     setSessionState("saved");
-    setNotice(`${visibleRows.length} student records saved for today's class.`);
+    setNotice(`${visibleRows.length} student records saved for ${sessionDate}.`);
   };
 
   const startSession = () => {
@@ -227,10 +240,24 @@ Demo bot preview only.`;
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-line bg-cream/45 px-3 py-2">
-                <p className="text-xs font-semibold uppercase text-ink/40">Date</p>
-                <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
-                  <CalendarDays size={15} /> {sessionDate}
-                </p>
+                <label className="block text-xs font-semibold uppercase text-ink/40" htmlFor="teacher-session-date">
+                  Date
+                </label>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <CalendarDays size={15} className="text-ink/55" />
+                  <input
+                    id="teacher-session-date"
+                    type="date"
+                    value={sessionDate}
+                    onChange={(event) => {
+                      setSessionDate(event.target.value);
+                      setSaved(false);
+                      setSessionState((current) => (current === "not_started" ? current : "in_progress"));
+                      setNotice(`Class date set to ${event.target.value}.`);
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-white px-2 py-1 text-sm font-semibold text-ink outline-none focus:border-gold-500"
+                  />
+                </div>
               </div>
               <div className="rounded-lg border border-line bg-cream/45 px-3 py-2">
                 <p className="text-xs font-semibold uppercase text-ink/40">Group</p>
@@ -441,12 +468,20 @@ Demo bot preview only.`;
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="truncate font-semibold text-ink">{student.name}</p>
+                    {isNewStudent(student.joinedDate) && (
+                      <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                        New student
+                      </span>
+                    )}
                     <AttendancePill status={student.attendance} />
                     {student.enrollmentStatus === "terminated" && (
                       <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Terminated</span>
                     )}
                   </div>
-                  <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.parentPhone}</p>
+                  <p className="mt-1 text-xs text-ink/45">
+                    {student.klass} · {student.parentPhone}
+                    {student.joinedDate ? ` · Joined ${student.joinedDate}` : ""}
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-3 gap-1.5">

@@ -11,6 +11,7 @@ import { TeacherReport } from "./pages/TeacherReport";
 import { AssessmentsPage } from "./pages/AssessmentsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { SchedulePage } from "./pages/SchedulePage";
+import { RegistrationDirectory } from "./pages/RegistrationDirectory";
 import { AcademyProvider, useAcademy } from "./data/academyStore";
 import { LoginPage } from "./pages/LoginPage";
 
@@ -40,6 +41,7 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
   }
   if (role === "Registration") {
     if (tab === "applications") return <ApplicationsPage />;
+    if (tab === "directory") return <RegistrationDirectory />;
     if (tab === "schedule") return <SchedulePage />;
   }
   return null;
@@ -81,8 +83,8 @@ function AuthenticatedApp() {
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar role={role} />
-        <main className="flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:py-6 lg:pb-8">
-          <div className="mx-auto w-full max-w-[1500px]">
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:py-6 lg:pb-8">
+          <div className="mx-auto w-full max-w-[1500px] min-w-0">
             <PageFor role={role} tab={tab} />
           </div>
         </main>

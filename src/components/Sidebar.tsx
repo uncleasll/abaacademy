@@ -35,7 +35,8 @@ export const navByRole: Record<Role, NavItem[]> = {
   ],
   Registration: [
     { key: "applications", label: "Applications", icon: FileCheck2 },
-    { key: "schedule", label: "Assessment Schedule", icon: CalendarClock },
+    { key: "directory", label: "Directory", icon: Users },
+    { key: "schedule", label: "Weekly Schedule", icon: CalendarClock },
   ],
 };
 

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
 import { SectionTitle } from "../components/ui";
 import { type StaffUser } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
@@ -12,7 +12,7 @@ const roleColors: Record<string, string> = {
 };
 
 export function UsersPage() {
-  const { staffUsers: users, createUser, updateUserStatus } = useAcademy();
+  const { staffUsers: users, createUser, deleteUser, updateUserStatus } = useAcademy();
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState("Role changes are saved locally for this session.");
@@ -41,6 +41,10 @@ export function UsersPage() {
   const toggleStatus = (user: StaffUser) => {
     void updateUserStatus(user.id, user.status === "active" ? "inactive" : "active");
     setNotice("User access status updated.");
+  };
+  const removeUser = (user: StaffUser) => {
+    void deleteUser(user.id);
+    setNotice(`${user.name} removed from staff access.`);
   };
 
   return (
@@ -128,6 +132,13 @@ export function UsersPage() {
               >
                 {user.status === "active" ? "Deactivate" : "Activate"}
               </button>
+              <button
+                onClick={() => removeUser(user)}
+                className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+                aria-label={`Delete ${user.name}`}
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -173,12 +184,21 @@ export function UsersPage() {
                 </td>
                 <td className="px-5 py-3.5 text-ink/50">{u.lastActive}</td>
                 <td className="px-5 py-3.5 text-right">
-                  <button
-                    onClick={() => toggleStatus(u)}
-                    className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
-                  >
-                    {u.status === "active" ? "Deactivate" : "Activate"}
-                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => toggleStatus(u)}
+                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                    >
+                      {u.status === "active" ? "Deactivate" : "Activate"}
+                    </button>
+                    <button
+                      onClick={() => removeUser(u)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                      aria-label={`Delete ${u.name}`}
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

@@ -36,6 +36,7 @@ export function StudentsPage() {
   const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord } = useAcademy();
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
+  const [riskFilter, setRiskFilter] = useState("All students");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(students[0]?.id ?? "");
 
@@ -48,10 +49,14 @@ export function StudentsPage() {
   const filtered = students.filter((student) => {
     const matchesTeacher = teacherFilter === "All teachers" || student.teacher === teacherFilter;
     const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
+    const matchesRisk =
+      riskFilter === "All students" ||
+      (riskFilter === "Low attendance" && (student.attendancePct < 80 || student.attendance === "absent")) ||
+      (riskFilter === "Overdue tuition" && student.tuitionStatus === "overdue");
     const matchesQuery = `${student.name} ${student.parentName} ${student.parentPhone} ${student.address} ${student.klass} ${student.teacher}`
       .toLowerCase()
       .includes(query.toLowerCase());
-    return matchesTeacher && matchesGroup && matchesQuery;
+    return matchesTeacher && matchesGroup && matchesRisk && matchesQuery;
   });
   const sorted = [...filtered].sort((a, b) => a.rank - b.rank);
   const selected = students.find((student) => student.id === selectedId) ?? sorted[0] ?? students[0];
@@ -59,6 +64,12 @@ export function StudentsPage() {
   const handleTeacherFilter = (teacher: string) => {
     setTeacherFilter(teacher);
     setGroupFilter("All groups");
+  };
+  const clearFilters = () => {
+    setTeacherFilter("All teachers");
+    setGroupFilter("All groups");
+    setRiskFilter("All students");
+    setQuery("");
   };
 
   const attendanceMap = useMemo(() => {
@@ -133,6 +144,24 @@ export function StudentsPage() {
                     <option key={group}>{group}</option>
                   ))}
                 </select>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <select
+                  value={riskFilter}
+                  onChange={(event) => setRiskFilter(event.target.value)}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+                >
+                  <option>All students</option>
+                  <option>Low attendance</option>
+                  <option>Overdue tuition</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                >
+                  Clear all
+                </button>
               </div>
             </div>
           </div>

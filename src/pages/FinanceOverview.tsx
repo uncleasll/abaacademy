@@ -62,6 +62,11 @@ function StudentTags({ student, missed }: { student: Student; missed: number }) 
     <div className="mt-2 flex flex-wrap gap-2">
       <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.teacher}</span>
       <span className="rounded-full bg-cream px-2.5 py-1 text-[11px] font-semibold text-ink/50">{student.klass}</span>
+      {student.joinedDate && (
+        <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+          Joined {student.joinedDate}
+        </span>
+      )}
       {missed > 0 && (
         <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
           {missed} missed
@@ -142,7 +147,8 @@ export function FinanceOverview() {
     const collectible = totalDue + collected;
     const collectionRate = collectible ? Math.round((collected / collectible) * 100) : 0;
     const risk = contactable.filter((student) => (missedMap.get(student.id)?.missed ?? 0) >= 2 || student.financeNote);
-    return { paid, open, doNotContact, contactable, totalDue, collected, collectionRate, risk };
+    const newStudents = scopedStudents.filter((student) => student.joinedDate);
+    return { paid, open, doNotContact, contactable, totalDue, collected, collectionRate, risk, newStudents };
   }, [missedMap, monthFilter, scopedStudents, tuitionMap]);
 
   const contactQueue = summary.contactable
@@ -251,10 +257,11 @@ export function FinanceOverview() {
         </div>
       </section>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <WorkbenchStat label="Contact today" value={String(contactQueue.length)} detail="Excludes terminated" tone="dark" />
         <WorkbenchStat label="Do not contact" value={String(doNotContactQueue.length)} detail="Terminated or stop billing" tone={doNotContactQueue.length ? "bad" : "default"} />
         <WorkbenchStat label="Attendance risk" value={String(summary.risk.length)} detail="Missed classes or notes" tone={summary.risk.length ? "warn" : "default"} />
+        <WorkbenchStat label="New students" value={String(summary.newStudents.length)} detail="Accepted into class" tone={summary.newStudents.length ? "good" : "default"} />
         <WorkbenchStat label="Outstanding" value={usd.format(summary.totalDue)} detail={`${monthFilter} open balance`} tone="warn" />
         <WorkbenchStat label="Collected" value={`${summary.collectionRate}%`} detail={usd.format(summary.collected)} tone="good" />
       </div>
@@ -306,6 +313,11 @@ export function FinanceOverview() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-ink">{student.name}</p>
+                      {student.joinedDate && (
+                        <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                          New · {student.joinedDate}
+                        </span>
+                      )}
                       <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
                         {suggestedAction}
                       </span>
@@ -477,6 +489,7 @@ export function FinanceOverview() {
                 <th className="px-4 py-3 font-semibold">Group</th>
                 <th className="px-4 py-3 font-semibold">Parent</th>
                 <th className="px-4 py-3 font-semibold">Phone</th>
+                <th className="px-4 py-3 font-semibold">Joined</th>
                 {tuitionMonths.map((month) => (
                   <th key={month} className="px-2 py-3 text-center font-semibold">{month.slice(0, 3)}</th>
                 ))}
@@ -490,6 +503,7 @@ export function FinanceOverview() {
                   <td className="px-4 py-3 text-ink/60">{student.klass}</td>
                   <td className="px-4 py-3 text-ink/65">{student.parentName}</td>
                   <td className="px-4 py-3 text-ink/55">{student.parentPhone}</td>
+                  <td className="px-4 py-3 text-ink/55">{student.joinedDate || "-"}</td>
                   {tuitionMonths.map((month) => {
                     const record = tuitionMap.get(`${student.id}:${month}`) ?? { status: "unpaid", amount: 0 };
                     const effectiveStatus = student.enrollmentStatus === "terminated" ? "absent" : record.status;
@@ -525,7 +539,7 @@ export function FinanceOverview() {
               ))}
               {scopedStudents.length === 0 && (
                 <tr>
-                  <td colSpan={5 + tuitionMonths.length} className="px-5 py-10 text-center text-sm text-ink/40">
+                  <td colSpan={6 + tuitionMonths.length} className="px-5 py-10 text-center text-sm text-ink/40">
                     No students match this finance filter.
                   </td>
                 </tr>

@@ -24,6 +24,7 @@ class Student(BaseModel):
     rank: int
     tuitionStatus: str
     amountDue: int
+    joinedDate: str = ""
     enrollmentStatus: str = "active"
     financeNote: str = ""
     terminationNote: str = ""
@@ -47,6 +48,7 @@ class Application(BaseModel):
     age: int
     parentName: str
     parentSurname: str
+    email: EmailStr | str = ""
     phone: str
     address: str
     program: str
@@ -68,6 +70,7 @@ class ApplicationCreate(BaseModel):
     age: int = Field(ge=3, le=18)
     parentName: str
     parentSurname: str
+    email: EmailStr | str = ""
     phone: str
     address: str
     program: str

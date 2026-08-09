@@ -57,6 +57,11 @@ export function AssessmentsPage() {
   }, [recordsByStudent, rows]);
 
   const saveScore = (studentId: string, patch: Partial<AssessmentRecord>) => {
+    const scorePatch = Object.entries(patch).find(([key, value]) => key !== "note" && typeof value === "number");
+    if (scorePatch && ((scorePatch[1] as number) < 0 || (scorePatch[1] as number) > 100)) {
+      setNotice("Scores must be between 0 and 100.");
+      return;
+    }
     const current = recordsByStudent.get(studentId) ?? { studentId, quarter, ...emptyScores };
     const next = { ...current, ...patch, quarter };
     void updateAssessmentRecord(next);

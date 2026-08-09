@@ -79,6 +79,7 @@ def student_row(row):
         "rank": data["rank"],
         "tuitionStatus": data["tuition_status"],
         "amountDue": data["amount_due"],
+        "joinedDate": data.get("joined_date", ""),
         "enrollmentStatus": data.get("enrollment_status", "active"),
         "financeNote": data.get("finance_note", ""),
         "terminationNote": data.get("termination_note", ""),
@@ -93,6 +94,7 @@ def application_row(row):
         "age": data["age"],
         "parentName": data["parent_name"],
         "parentSurname": data["parent_surname"],
+        "email": data.get("email", ""),
         "phone": data["phone"],
         "address": data["address"],
         "program": data["program"],
@@ -185,6 +187,64 @@ def assessment_row(row):
         "practical": data["practical"],
         "note": data["note"],
     }
+
+
+def recalculate_attendance_summary(conn, student_id: str) -> None:
+    rows = conn.execute("SELECT present FROM attendance_records WHERE student_id = ? ORDER BY date", (student_id,)).fetchall()
+    if not rows:
+        attendance_pct = 0
+        attendance = "absent"
+    else:
+        present_count = sum(1 for row in rows if row["present"])
+        attendance_pct = round((present_count / len(rows)) * 100)
+        attendance = "present" if rows[-1]["present"] else "absent"
+    conn.execute(
+        "UPDATE students SET attendance_pct = ?, attendance = ? WHERE id = ?",
+        (attendance_pct, attendance, student_id),
+    )
+
+
+def enroll_accepted_application(conn, application) -> None:
+    existing = conn.execute(
+        "SELECT id FROM students WHERE name = ? AND parent_phone = ?",
+        (application["name"], application["phone"]),
+    ).fetchone()
+    if existing:
+        return
+    next_rank = conn.execute("SELECT COALESCE(MAX(rank), 0) + 1 AS rank FROM students").fetchone()["rank"]
+    student_id = f"s-{uuid4().hex[:10]}"
+    parent_name = f"{application['parent_name']} {application['parent_surname']}".strip()
+    conn.execute(
+        """
+        INSERT INTO students
+        (id, name, age, parent_name, parent_phone, address, klass, teacher, stars, hw, attendance,
+         next_hw, attendance_pct, performance, homework_avg, overall, status, rank, tuition_status, amount_due,
+         joined_date, enrollment_status, finance_note, termination_note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'not_done', 'present', '', 100, 0, 0, 0, 'Good', ?, 'unpaid', 450, ?, 'active', '', '')
+        """,
+        (
+            student_id,
+            application["name"],
+            application["age"],
+            parent_name,
+            application["phone"],
+            application["address"],
+            application["klass"],
+            application["teacher"],
+            next_rank,
+            date.today().isoformat(),
+        ),
+    )
+    for day in ["2026-04-15", "2026-05-01", "2026-05-15", "2026-06-01", "2026-06-15", "2026-07-01", "2026-07-15", "2026-08-01"]:
+        conn.execute(
+            "INSERT OR IGNORE INTO attendance_records (student_id, date, present) VALUES (?, ?, 1)",
+            (student_id, day),
+        )
+    for month in ["September", "October", "November", "December", "January", "February", "March", "April", "May", "June"]:
+        conn.execute(
+            "INSERT OR IGNORE INTO tuition_records (student_id, month, status, amount) VALUES (?, ?, 'unpaid', 0)",
+            (student_id, month),
+        )
 
 
 @app.get("/health")
@@ -366,6 +426,7 @@ def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(requir
             """,
             (payload.studentId, payload.date, 1 if payload.present else 0),
         )
+        recalculate_attendance_summary(conn, payload.studentId)
     audit("attendance.updated", {"actorId": user["id"], "studentId": payload.studentId, "date": payload.date, "present": payload.present})
     return {"ok": True}
 
@@ -432,10 +493,10 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
         conn.execute(
             """
             INSERT INTO applications
-            (id, name, age, parent_name, parent_surname, phone, address, program, teacher, klass, submitted, status,
+            (id, name, age, parent_name, parent_surname, email, phone, address, program, teacher, klass, submitted, status,
              emergency_contact1_name, emergency_contact1_phone, emergency_contact1_relation,
              emergency_contact2_name, emergency_contact2_phone, emergency_contact2_relation, parent_telegram)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 app_id,
@@ -443,6 +504,7 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
                 payload.age,
                 payload.parentName,
                 payload.parentSurname,
+                str(payload.email),
                 payload.phone,
                 payload.address,
                 payload.program,
@@ -475,12 +537,16 @@ def update_application_status(application_id: str, payload: StatusPatch, user=De
                 raise HTTPException(status_code=403, detail="Teachers can only accept or reject their assigned review applicants")
         conn.execute("UPDATE applications SET status = ? WHERE id = ?", (payload.status, application_id))
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
+        if payload.status == "accepted":
+            enroll_accepted_application(conn, row)
     audit("application.status_updated", {"applicationId": application_id, "status": payload.status, "actorId": user["id"]})
     return application_row(row)
 
 
 @app.post("/api/users", status_code=201)
-def create_user(payload: StaffUserCreate, user=Depends(require_roles("IT Admin"))):
+def create_user(payload: StaffUserCreate, user=Depends(require_roles("IT Admin", "Registration"))):
+    if user["role"] == "Registration" and payload.role != "Teacher":
+        raise HTTPException(status_code=403, detail="Registration can only create teacher accounts")
     user_id = f"u-{uuid4().hex[:10]}"
     with connect() as conn:
         conn.execute(
@@ -511,6 +577,21 @@ def update_user_status(user_id: str, payload: StatusPatch, user=Depends(require_
         row = conn.execute("SELECT * FROM staff_users WHERE id = ?", (user_id,)).fetchone()
     audit("user.status_updated", {"userId": user_id, "status": payload.status, "actorId": user["id"]})
     return staff_row(row)
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_user(user_id: str, user=Depends(require_roles("IT Admin", "Registration"))):
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="Admins cannot delete their own active session")
+    with connect() as conn:
+        exists = conn.execute("SELECT id, role FROM staff_users WHERE id = ?", (user_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user["role"] == "Registration" and exists["role"] != "Teacher":
+            raise HTTPException(status_code=403, detail="Registration can only delete teacher accounts")
+        conn.execute("DELETE FROM staff_users WHERE id = ?", (user_id,))
+    audit("user.deleted", {"userId": user_id, "actorId": user["id"]})
+    return None
 
 
 @app.post("/api/meetings", status_code=201)

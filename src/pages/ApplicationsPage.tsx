@@ -1,35 +1,35 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { ArrowRight, Phone, Plus, Search, UserRoundPlus, UsersRound } from "lucide-react";
+import { ArrowRight, Clock3, Mail, Phone, Plus, Search, UserRoundPlus, UsersRound } from "lucide-react";
 import { type Application, type AppStatus, classGroups as fallbackClassGroups } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
 
 const pipelineStages: { key: AppStatus; label: string; empty: string }[] = [
   { key: "pending", label: "New", empty: "No new families" },
-  { key: "assessment", label: "Assessment", empty: "No assessments pending" },
-  { key: "interview", label: "Interview", empty: "No interviews pending" },
   { key: "teacher_review", label: "Teacher Review", empty: "No teacher decisions pending" },
   { key: "accepted", label: "Accepted", empty: "No accepted applicants" },
 ];
 
 const nextStatus: Partial<Record<AppStatus, AppStatus>> = {
-  pending: "assessment",
-  assessment: "interview",
-  interview: "teacher_review",
+  pending: "teacher_review",
   teacher_review: "accepted",
 };
 
 const actionLabel: Partial<Record<AppStatus, string>> = {
-  pending: "Send to assessment",
-  assessment: "Schedule interview",
-  interview: "Request teacher review",
+  pending: "Send to teacher review",
   teacher_review: "Mark accepted",
 };
+
+function pipelineStatus(status: AppStatus) {
+  if (status === "assessment" || status === "interview") return "teacher_review";
+  return status;
+}
 
 const emptyForm = {
   name: "",
   age: "8",
   parentName: "",
   parentSurname: "",
+  email: "",
   phone: "",
   emergencyContact1Name: "",
   emergencyContact1Phone: "",
@@ -63,12 +63,14 @@ function IntakeStat({
   };
 
   return (
-    <div className={`rounded-lg border p-4 shadow-sm ${styles[tone]}`}>
+    <div className={`rounded-lg border p-3 shadow-sm ${styles[tone]}`}>
       <p className={`text-xs font-semibold uppercase ${tone === "dark" ? "text-gold-300" : "text-ink/45"}`}>
         {label}
       </p>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
-      <p className={`mt-2 text-xs ${tone === "dark" ? "text-cream/65" : "text-ink/50"}`}>{detail}</p>
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <p className="text-2xl font-semibold">{value}</p>
+        <p className={`pb-1 text-right text-xs ${tone === "dark" ? "text-cream/65" : "text-ink/50"}`}>{detail}</p>
+      </div>
     </div>
   );
 }
@@ -105,52 +107,67 @@ function Field({
   );
 }
 
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)})${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 function ApplicantCard({
   app,
   onAdvance,
+  onWaitlist,
   onReject,
 }: {
   app: Application;
   onAdvance: (app: Application) => void;
+  onWaitlist: (app: Application) => void;
   onReject: (app: Application) => void;
 }) {
+  const effectiveStatus = pipelineStatus(app.status);
   return (
     <article className="rounded-lg border border-line bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-ink">{app.name}</p>
-          <p className="mt-1 text-xs text-ink/45">Age {app.age} · {app.program}</p>
+          <p className="text-sm font-semibold leading-snug text-ink">{app.name}</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink/45">Age {app.age} · {app.program}</p>
         </div>
-        <span className="rounded-full bg-gold-500/15 px-2.5 py-1 text-[11px] font-semibold text-gold-600">
-          {app.status.replace("_", " ")}
-        </span>
       </div>
-      <p className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-ink/60">
-        <Phone size={12} /> {app.parentName} {app.parentSurname} · {app.phone}
+      <p className="mt-3 flex items-start gap-1.5 text-xs font-semibold leading-relaxed text-ink/60">
+        <Phone className="mt-0.5 shrink-0" size={12} /> <span>{app.parentName} {app.parentSurname} · {app.phone}</span>
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md bg-cream px-2.5 py-2">
-          <p className="font-semibold text-ink/40">Teacher</p>
-          <p className="mt-0.5 font-semibold text-ink">{app.teacher}</p>
-        </div>
-        <div className="rounded-md bg-cream px-2.5 py-2">
-          <p className="font-semibold text-ink/40">Group</p>
-          <p className="mt-0.5 font-semibold text-ink">{app.klass}</p>
-        </div>
-      </div>
-      {app.status === "teacher_review" && (
-        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-          Waiting for teacher to accept or decline.
+      {app.email && (
+        <p className="mt-1 flex items-start gap-1.5 text-xs font-semibold leading-relaxed text-ink/50">
+          <Mail className="mt-0.5 shrink-0" size={12} /> <span className="break-all">{app.email}</span>
         </p>
       )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {nextStatus[app.status] && (
+      <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-semibold text-ink/55">
+        <span className="rounded-md bg-cream px-2 py-1">{app.teacher}</span>
+        <span className="rounded-md bg-cream px-2 py-1">{app.klass}</span>
+      </div>
+      {effectiveStatus === "teacher_review" && (
+        <p className="mt-3 rounded-md bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800">
+          Waiting for teacher decision.
+        </p>
+      )}
+      <div className="mt-3 grid gap-2">
+        {nextStatus[effectiveStatus] ? (
           <button
             type="button"
             onClick={() => onAdvance(app)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
           >
-            {actionLabel[app.status]} <ArrowRight size={13} />
+            {actionLabel[effectiveStatus]} <ArrowRight size={13} />
+          </button>
+        ) : null}
+        {app.status !== "accepted" && app.status !== "rejected" && (
+          <button
+            type="button"
+            onClick={() => onWaitlist(app)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50"
+          >
+            <Clock3 size={13} /> Waitlist
           </button>
         )}
         {app.status !== "accepted" && app.status !== "rejected" && (
@@ -194,10 +211,13 @@ export function ApplicationsPage() {
     return matchesTeacher && matchesGroup && matchesQuery;
   });
   const rejectedApps = visibleApps.filter((app) => app.status === "rejected");
-  const lookupRows = students
-    .filter((student) => `${student.name} ${student.parentName} ${student.parentPhone} ${student.teacher} ${student.klass}`.toLowerCase().includes(query.toLowerCase()))
-    .slice(0, 6);
+  const waitlistApps = visibleApps.filter((app) => app.status === "waitlist");
+  const lookupMatches = students.filter((student) =>
+    `${student.name} ${student.parentName} ${student.parentPhone} ${student.teacher} ${student.klass}`.toLowerCase().includes(query.toLowerCase())
+  );
+  const lookupRows = lookupMatches.slice(0, 12);
   const selectedGroup = classGroups.find((group) => group.name === form.klass);
+  const activePipelineApps = visibleApps.filter((app) => ["pending", "assessment", "interview", "teacher_review", "accepted"].includes(app.status));
   const updateForm = (patch: Partial<typeof form>) => setForm((prev) => ({ ...prev, ...patch }));
 
   const handleTeacherChange = (teacher: string) => {
@@ -224,13 +244,22 @@ export function ApplicationsPage() {
   };
 
   const advance = (app: Application) => {
-    if (nextStatus[app.status]) void updateApplicationStatus(app.id, nextStatus[app.status]!);
-    setNotice(`${app.name}: ${actionLabel[app.status] ?? "Moved forward"}.`);
+    const effectiveStatus = pipelineStatus(app.status);
+    if (nextStatus[effectiveStatus]) void updateApplicationStatus(app.id, nextStatus[effectiveStatus]!);
+    setNotice(`${app.name}: ${actionLabel[effectiveStatus] ?? "Moved forward"}.`);
   };
 
   const reject = (app: Application) => {
     void updateApplicationStatus(app.id, "rejected");
     setNotice(`${app.name} marked as rejected.`);
+  };
+  const waitlist = (app: Application) => {
+    void updateApplicationStatus(app.id, "waitlist");
+    setNotice(`${app.name} moved to waitlist.`);
+  };
+  const moveFromWaitlist = (app: Application, status: AppStatus) => {
+    void updateApplicationStatus(app.id, status);
+    setNotice(`${app.name} moved from waitlist to ${status.replace("_", " ")}.`);
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -240,7 +269,8 @@ export function ApplicationsPage() {
       age: Number(form.age),
       parentName: form.parentName.trim(),
       parentSurname: form.parentSurname.trim(),
-      phone: form.phone.trim(),
+      email: form.email.trim(),
+      phone: formatPhone(form.phone),
       emergencyContact1Name: form.emergencyContact1Name.trim(),
       emergencyContact1Phone: form.emergencyContact1Phone.trim(),
       emergencyContact1Relation: form.emergencyContact1Relation.trim(),
@@ -260,23 +290,21 @@ export function ApplicationsPage() {
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-line bg-white shadow-sm">
-        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_380px] xl:items-start">
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_440px] xl:items-start">
           <div>
             <div className="flex flex-wrap gap-2">
               <span className="rounded-md bg-gold-500/15 px-2.5 py-1 text-xs font-semibold uppercase text-gold-600">
                 Registration
               </span>
               <span className="rounded-md bg-cream px-2.5 py-1 text-xs font-semibold text-ink/55">
-                {visibleApps.length} visible applicants
+                {activePipelineApps.length} active applicants
               </span>
             </div>
             <h1 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Admissions pipeline</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">
-              Move each family from intake to assessment, interview, teacher review, and final acceptance.
-            </p>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink/55">Register families, route them to teacher review, and track final enrollment.</p>
           </div>
-          <div className="rounded-lg border border-line bg-cream/45 p-3">
-            <div className="grid gap-2">
+          <div className="rounded-lg border border-line bg-cream/45 p-3 shadow-sm">
+            <div className="grid gap-2 md:grid-cols-[1fr_150px_150px] xl:grid-cols-1">
               <label className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={16} />
                 <input
@@ -286,44 +314,134 @@ export function ApplicationsPage() {
                   className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-gold-500"
                 />
               </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <select
-                  value={teacherFilter}
-                  onChange={(event) => handleTeacherFilter(event.target.value)}
-                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
-                >
-                  <option>All teachers</option>
-                  {teachers.map((teacher) => (
-                    <option key={teacher}>{teacher}</option>
-                  ))}
-                </select>
-                <select
-                  value={groupFilter}
-                  onChange={(event) => setGroupFilter(event.target.value)}
-                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
-                >
-                  <option>All groups</option>
-                  {filteredGroupOptions.map((group) => (
-                    <option key={group}>{group}</option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={teacherFilter}
+                onChange={(event) => handleTeacherFilter(event.target.value)}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                <option>All teachers</option>
+                {teachers.map((teacher) => (
+                  <option key={teacher}>{teacher}</option>
+                ))}
+              </select>
+              <select
+                value={groupFilter}
+                onChange={(event) => setGroupFilter(event.target.value)}
+                className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+              >
+                <option>All groups</option>
+                {filteredGroupOptions.map((group) => (
+                  <option key={group}>{group}</option>
+                ))}
+              </select>
             </div>
-            <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <IntakeStat label="New" value={String(apps.filter((app) => app.status === "pending").length)} detail="Needs first contact" tone="dark" />
-        <IntakeStat label="Assessment" value={String(apps.filter((app) => app.status === "assessment").length)} detail="Ready to schedule" />
-        <IntakeStat label="Interview" value={String(apps.filter((app) => app.status === "interview").length)} detail="Family decision stage" />
-        <IntakeStat label="Teacher review" value={String(apps.filter((app) => app.status === "teacher_review").length)} detail="Waiting on teacher" tone="warn" />
+        <IntakeStat label="Teacher review" value={String(apps.filter((app) => pipelineStatus(app.status) === "teacher_review").length)} detail="Waiting on teacher" tone="warn" />
+        <IntakeStat label="Waitlist" value={String(apps.filter((app) => app.status === "waitlist").length)} detail="Acknowledgement needed" tone="warn" />
         <IntakeStat label="Accepted" value={String(apps.filter((app) => app.status === "accepted").length)} detail="Ready for enrollment" tone="good" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
-        <div className="space-y-5">
+      <div className="grid gap-5">
+        <section className="order-1 rounded-lg border border-line bg-white shadow-sm">
+          <div className="border-b border-line px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-ink">Pipeline board</h2>
+                <p className="mt-0.5 text-sm text-ink/45">New families move directly to teacher review.</p>
+              </div>
+              <p className="rounded-md bg-cream px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>
+            </div>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {pipelineStages.map((stage) => {
+              const stageApps = visibleApps.filter((app) => pipelineStatus(app.status) === stage.key);
+              return (
+                <div key={stage.key} className="min-w-0 rounded-lg border border-line bg-cream/45">
+                  <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-3">
+                    <p className="text-sm font-bold leading-snug text-ink">{stage.label}</p>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-ink/50">{stageApps.length}</span>
+                  </div>
+                  <div className="max-h-[520px] space-y-3 overflow-y-auto p-3">
+                    {stageApps.map((app) => (
+                      <ApplicantCard
+                        key={app.id}
+                        app={app}
+                        onAdvance={advance}
+                        onWaitlist={waitlist}
+                        onReject={reject}
+                      />
+                    ))}
+                    {stageApps.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-line bg-white/60 px-3 py-8 text-center text-xs font-semibold text-ink/35">
+                        {stage.empty}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {waitlistApps.length > 0 && (
+            <div className="border-t border-line px-5 py-4">
+              <p className="mb-3 text-xs font-semibold uppercase text-ink/40">Waitlist</p>
+              <div className="grid gap-3">
+                {waitlistApps.map((app) => (
+                  <div key={app.id} className="grid min-w-0 gap-3 rounded-lg border border-line bg-white p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-ink">{app.name}</p>
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">Waitlist</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-ink/45">
+                        {app.parentName} {app.parentSurname} · {app.phone}{app.email ? ` · ${app.email}` : ""}
+                      </p>
+                    </div>
+                    <p className="min-w-0 truncate text-sm font-semibold text-ink/55">
+                      {app.klass} · {app.teacher}
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:w-[260px]">
+                      <button
+                        type="button"
+                        onClick={() => moveFromWaitlist(app, "pending")}
+                        className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
+                      >
+                        Move to New
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveFromWaitlist(app, "teacher_review")}
+                        className="rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+                      >
+                        Teacher Review
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {rejectedApps.length > 0 && (
+            <div className="border-t border-line px-5 py-4">
+              <p className="mb-3 text-xs font-semibold uppercase text-ink/40">Rejected</p>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {rejectedApps.map((app) => (
+                  <div key={app.id} className="rounded-lg border border-line bg-white p-3">
+                    <p className="text-sm font-semibold text-ink">{app.name}</p>
+                    <p className="mt-1 text-xs text-ink/45">{app.parentName} {app.parentSurname} · {app.phone}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="order-2">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
             <div className="mb-5 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-900 text-cream">
@@ -354,7 +472,10 @@ export function ApplicationsPage() {
                   <Field label="Last name" value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <Field label="Phone" value={form.phone} onChange={(phone) => updateForm({ phone })} placeholder="(718) 555-0199" />
+                  <Field label="Phone" value={form.phone} onChange={(phone) => updateForm({ phone: formatPhone(phone) })} placeholder="(718) 555-0199" />
+                  <Field label="Email" type="email" value={form.email} onChange={(email) => updateForm({ email })} placeholder="parent@example.com" />
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field label="Telegram" value={form.parentTelegram} onChange={(parentTelegram) => updateForm({ parentTelegram })} placeholder="@parent" required={false} />
                 </div>
               </div>
@@ -427,9 +548,11 @@ export function ApplicationsPage() {
                 </h2>
                 <p className="mt-0.5 text-sm text-ink/45">Quick parent contacts</p>
               </div>
-              <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{students.length}</span>
+              <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">
+                {lookupRows.length}/{lookupMatches.length}
+              </span>
             </div>
-            <div className="divide-y divide-line">
+            <div className="max-h-80 divide-y divide-line overflow-y-auto">
               {lookupRows.map((student) => (
                 <div key={student.id} className="px-5 py-3">
                   <p className="truncate text-sm font-semibold text-ink">{student.name}</p>
@@ -441,51 +564,14 @@ export function ApplicationsPage() {
                 <p className="px-5 py-8 text-center text-sm text-ink/40">No students match this search.</p>
               )}
             </div>
+            {lookupMatches.length > lookupRows.length && (
+              <p className="border-t border-line px-5 py-3 text-xs font-semibold text-ink/40">
+                Showing first {lookupRows.length}. Use search to narrow results.
+              </p>
+            )}
           </section>
+          </div>
         </div>
-
-        <section className="rounded-lg border border-line bg-white shadow-sm">
-          <div className="border-b border-line px-5 py-4">
-            <h2 className="text-lg font-bold text-ink">Pipeline board</h2>
-            <p className="mt-0.5 text-sm text-ink/45">Each column shows the next operational step.</p>
-          </div>
-          <div className="grid gap-3 p-4 xl:grid-cols-5">
-            {pipelineStages.map((stage) => {
-              const stageApps = visibleApps.filter((app) => app.status === stage.key);
-              return (
-                <div key={stage.key} className="min-w-0 rounded-lg border border-line bg-cream/45">
-                  <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-3">
-                    <p className="text-sm font-bold text-ink">{stage.label}</p>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-ink/50">{stageApps.length}</span>
-                  </div>
-                  <div className="space-y-3 p-3">
-                    {stageApps.map((app) => (
-                      <ApplicantCard key={app.id} app={app} onAdvance={advance} onReject={reject} />
-                    ))}
-                    {stageApps.length === 0 && (
-                      <p className="rounded-lg border border-dashed border-line bg-white/60 px-3 py-8 text-center text-xs font-semibold text-ink/35">
-                        {stage.empty}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {rejectedApps.length > 0 && (
-            <div className="border-t border-line px-5 py-4">
-              <p className="mb-3 text-xs font-semibold uppercase text-ink/40">Rejected</p>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {rejectedApps.map((app) => (
-                  <div key={app.id} className="rounded-lg border border-line bg-white p-3">
-                    <p className="text-sm font-semibold text-ink">{app.name}</p>
-                    <p className="mt-1 text-xs text-ink/45">{app.parentName} {app.parentSurname} · {app.phone}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
       </div>
     </div>
   );

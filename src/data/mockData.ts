@@ -2,7 +2,7 @@ export type AttendanceStatus = "present" | "late" | "absent";
 export type HwStatus = "done" | "partial" | "not_done";
 export type PaymentStatus = "paid" | "unpaid" | "overdue";
 export type MonthlyPaymentStatus = "paid" | "partial" | "unpaid" | "sponsor" | "voucher" | "absent";
-export type AppStatus = "pending" | "assessment" | "interview" | "teacher_review" | "accepted" | "rejected";
+export type AppStatus = "pending" | "assessment" | "interview" | "teacher_review" | "waitlist" | "accepted" | "rejected";
 export type EnrollmentStatus = "active" | "paused" | "terminated";
 export type QuarterKey = "Q1" | "Q2" | "Q3" | "Final";
 
@@ -27,6 +27,7 @@ export interface Student {
   rank: number;
   tuitionStatus: PaymentStatus;
   amountDue: number;
+  joinedDate?: string;
   enrollmentStatus?: EnrollmentStatus;
   financeNote?: string;
   terminationNote?: string;
@@ -89,6 +90,7 @@ export interface Application {
   age: number;
   parentName: string;
   parentSurname: string;
+  email?: string;
   phone: string;
   address: string;
   program: string;
@@ -117,11 +119,11 @@ export interface AssessmentRecord {
 }
 
 export const applications: Application[] = [
-  { id: "a1", name: "Sardorbek Yusupov", age: 8, parentName: "Farrukh", parentSurname: "Yusupov", phone: "(646) 555-4567", address: "Brooklyn, NY 11219", program: "Full-Time Hifz", teacher: "Behzodjon", klass: "Al-Bukhari", submitted: "2026-06-28", status: "pending" },
-  { id: "a2", name: "Muhammadyusuf Karimov", age: 9, parentName: "Dilshod", parentSurname: "Karimov", phone: "(718) 555-7890", address: "Queens, NY 11375", program: "Full-Time Hifz", teacher: "Sardor", klass: "Al-Furqan", submitted: "2026-06-25", status: "assessment" },
-  { id: "a3", name: "Amirbek Nosirov", age: 7, parentName: "Jasur", parentSurname: "Nosirov", phone: "(917) 555-5678", address: "Jersey City, NJ 07306", program: "Online Academic", teacher: "Malika", klass: "An-Nur", submitted: "2026-06-20", status: "interview" },
-  { id: "a4", name: "Islombek Rahimov", age: 10, parentName: "Otabek", parentSurname: "Rahimov", phone: "(347) 555-6789", address: "Brooklyn, NY 11223", program: "Full-Time Hifz", teacher: "Behzodjon", klass: "Al-Bukhari", submitted: "2026-06-15", status: "accepted" },
-  { id: "a5", name: "Diyorbek Saidov", age: 8, parentName: "Aziz", parentSurname: "Saidov", phone: "(929) 555-8901", address: "Edison, NJ 08820", program: "Full-Time Hifz", teacher: "Sardor", klass: "Al-Furqan", submitted: "2026-06-10", status: "rejected" },
+  { id: "a1", name: "Sardorbek Yusupov", age: 8, parentName: "Farrukh", parentSurname: "Yusupov", email: "farrukh@example.com", phone: "(646) 555-4567", address: "Brooklyn, NY 11219", program: "Full-Time Hifz", teacher: "Behzodjon", klass: "Al-Bukhari", submitted: "2026-06-28", status: "pending" },
+  { id: "a2", name: "Muhammadyusuf Karimov", age: 9, parentName: "Dilshod", parentSurname: "Karimov", email: "dilshod@example.com", phone: "(718) 555-7890", address: "Queens, NY 11375", program: "Full-Time Hifz", teacher: "Sardor", klass: "Al-Furqan", submitted: "2026-06-25", status: "assessment" },
+  { id: "a3", name: "Amirbek Nosirov", age: 7, parentName: "Jasur", parentSurname: "Nosirov", email: "jasur@example.com", phone: "(917) 555-5678", address: "Jersey City, NJ 07306", program: "Online Academic", teacher: "Malika", klass: "An-Nur", submitted: "2026-06-20", status: "interview" },
+  { id: "a4", name: "Islombek Rahimov", age: 10, parentName: "Otabek", parentSurname: "Rahimov", email: "otabek@example.com", phone: "(347) 555-6789", address: "Brooklyn, NY 11223", program: "Full-Time Hifz", teacher: "Behzodjon", klass: "Al-Bukhari", submitted: "2026-06-15", status: "accepted" },
+  { id: "a5", name: "Diyorbek Saidov", age: 8, parentName: "Aziz", parentSurname: "Saidov", email: "aziz@example.com", phone: "(929) 555-8901", address: "Edison, NJ 08820", program: "Full-Time Hifz", teacher: "Sardor", klass: "Al-Furqan", submitted: "2026-06-10", status: "rejected" },
 ];
 
 export const assessmentCalendar = [

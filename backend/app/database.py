@@ -52,7 +52,8 @@ def init_db() -> None:
               status TEXT NOT NULL DEFAULT 'Good',
               rank INTEGER NOT NULL DEFAULT 0,
               tuition_status TEXT NOT NULL DEFAULT 'unpaid',
-              amount_due INTEGER NOT NULL DEFAULT 0
+              amount_due INTEGER NOT NULL DEFAULT 0,
+              joined_date TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS applications (
@@ -139,6 +140,7 @@ def init_db() -> None:
             "ALTER TABLE students ADD COLUMN enrollment_status TEXT NOT NULL DEFAULT 'active'",
             "ALTER TABLE students ADD COLUMN finance_note TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE students ADD COLUMN termination_note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE students ADD COLUMN joined_date TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE applications ADD COLUMN emergency_contact1_name TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE applications ADD COLUMN emergency_contact1_phone TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE applications ADD COLUMN emergency_contact1_relation TEXT NOT NULL DEFAULT ''",
@@ -146,6 +148,7 @@ def init_db() -> None:
             "ALTER TABLE applications ADD COLUMN emergency_contact2_phone TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE applications ADD COLUMN emergency_contact2_relation TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE applications ADD COLUMN parent_telegram TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE applications ADD COLUMN email TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE attendance_records ADD COLUMN note TEXT NOT NULL DEFAULT ''",
         ]:
             try:
