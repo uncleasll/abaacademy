@@ -1,9 +1,11 @@
 import {
+  BarChart3,
   Check,
   ClipboardList,
   CreditCard,
   FileCheck2,
   ShieldCheck,
+  TrendingUp,
   UserCog,
   Users,
 } from "lucide-react";
@@ -22,6 +24,19 @@ const roleTone: Record<string, string> = {
   Teacher: "bg-indigo-500/10 text-indigo-700",
   Registration: "bg-amber-400/15 text-amber-700",
 };
+
+function percent(value: number, total: number) {
+  return total ? Math.round((value / total) * 100) : 0;
+}
+
+function monthKey(date: string) {
+  return date.slice(0, 7);
+}
+
+function monthLabel(key: string) {
+  const value = new Date(`${key}-01T00:00:00`);
+  return value.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
 
 function OpsStat({
   label,
@@ -57,6 +72,90 @@ export function AdminOverview() {
   const { applications, attendanceDates, attendanceRecords, classGroups, staffUsers, students } = useAcademy();
   const [notice, setNotice] = useState("Operations exceptions are current.");
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  const monthOptions = useMemo(() => Array.from(new Set(attendanceDates.map(monthKey))).sort(), [attendanceDates]);
+  const [monthFilter, setMonthFilter] = useState(monthOptions.at(-1) ?? "all");
+  const [teacherFilter, setTeacherFilter] = useState("All teachers");
+  const [groupFilter, setGroupFilter] = useState("All groups");
+
+  const teacherOptions = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), [classGroups]);
+  const groupOptions = useMemo(() => {
+    if (teacherFilter === "All teachers") return classGroups.map((group) => group.name);
+    return classGroups.filter((group) => group.teacher === teacherFilter).map((group) => group.name);
+  }, [classGroups, teacherFilter]);
+
+  const scopedStudents = useMemo(
+    () =>
+      students.filter((student) => {
+        const matchesTeacher = teacherFilter === "All teachers" || student.teacher === teacherFilter;
+        const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
+        return matchesTeacher && matchesGroup;
+      }),
+    [groupFilter, students, teacherFilter]
+  );
+
+  const kpi = useMemo(() => {
+    const activeDates = monthFilter === "all" ? attendanceDates : attendanceDates.filter((date) => monthKey(date) === monthFilter);
+    const scopedIds = new Set(scopedStudents.map((student) => student.id));
+    const monthRecords = attendanceRecords.filter((record) => scopedIds.has(record.studentId) && activeDates.includes(record.date));
+    const present = monthRecords.filter((record) => record.present).length;
+    const absent = monthRecords.length - present;
+    const avgOverall = scopedStudents.length
+      ? Math.round(scopedStudents.reduce((sum, student) => sum + student.overall, 0) / scopedStudents.length)
+      : 0;
+    const avgPerformance = scopedStudents.length
+      ? Math.round(scopedStudents.reduce((sum, student) => sum + student.performance, 0) / scopedStudents.length)
+      : 0;
+    const homework = scopedStudents.length
+      ? Math.round(scopedStudents.reduce((sum, student) => sum + student.homeworkAvg, 0) / scopedStudents.length)
+      : 0;
+    const lowAttendance = scopedStudents.filter((student) => {
+      const studentRecords = monthRecords.filter((record) => record.studentId === student.id);
+      const studentAttendance = percent(studentRecords.filter((record) => record.present).length, studentRecords.length);
+      return studentRecords.length > 0 && studentAttendance < 80;
+    });
+    const needsAcademicHelp = scopedStudents.filter((student) => student.overall < 75 || student.performance < 75);
+    const excellent = scopedStudents.filter((student) => student.overall >= 90).length;
+    return {
+      activeDates,
+      monthRecords,
+      present,
+      absent,
+      attendancePct: percent(present, monthRecords.length),
+      avgOverall,
+      avgPerformance,
+      homework,
+      lowAttendance,
+      needsAcademicHelp,
+      excellentPct: percent(excellent, scopedStudents.length),
+    };
+  }, [attendanceDates, attendanceRecords, monthFilter, scopedStudents]);
+
+  const attendanceTrend = useMemo(
+    () =>
+      monthOptions.map((key) => {
+        const dates = attendanceDates.filter((date) => monthKey(date) === key);
+        const scopedIds = new Set(scopedStudents.map((student) => student.id));
+        const records = attendanceRecords.filter((record) => scopedIds.has(record.studentId) && dates.includes(record.date));
+        const present = records.filter((record) => record.present).length;
+        return { key, label: monthLabel(key), pct: percent(present, records.length), total: records.length };
+      }),
+    [attendanceDates, attendanceRecords, monthOptions, scopedStudents]
+  );
+
+  const teacherBreakdown = useMemo(
+    () =>
+      teacherOptions.map((teacher) => {
+        const teacherStudents = scopedStudents.filter((student) => student.teacher === teacher);
+        const avgOverall = teacherStudents.length
+          ? Math.round(teacherStudents.reduce((sum, student) => sum + student.overall, 0) / teacherStudents.length)
+          : 0;
+        const ids = new Set(teacherStudents.map((student) => student.id));
+        const records = kpi.monthRecords.filter((record) => ids.has(record.studentId));
+        const present = records.filter((record) => record.present).length;
+        return { teacher, count: teacherStudents.length, overall: avgOverall, attendance: percent(present, records.length) };
+      }).filter((item) => item.count > 0),
+    [kpi.monthRecords, scopedStudents, teacherOptions]
+  );
 
   const operations = useMemo(() => {
     const missedStats = students
@@ -176,6 +275,169 @@ export function AdminOverview() {
         <OpsStat label="Attendance" value={String(operations.lowAttendance.length)} detail="Students needing follow-up" tone={operations.lowAttendance.length ? "bad" : "good"} />
         <OpsStat label="Staff active" value={`${operations.activeUsers}/${staffUsers.length}`} detail="Access coverage" tone="good" />
       </div>
+
+      <section className="rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid gap-4 border-b border-line p-5 xl:grid-cols-[1fr_560px] xl:items-start">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
+              <BarChart3 size={19} /> Student KPI dashboard
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-relaxed text-ink/50">
+              Month, teacher, and group view of how students are performing, with attendance percentages calculated from class records.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <select
+              value={monthFilter}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+            >
+              <option value="all">All months</option>
+              {monthOptions.map((key) => (
+                <option key={key} value={key}>{monthLabel(key)}</option>
+              ))}
+            </select>
+            <select
+              value={teacherFilter}
+              onChange={(event) => {
+                setTeacherFilter(event.target.value);
+                setGroupFilter("All groups");
+              }}
+              className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+            >
+              <option>All teachers</option>
+              {teacherOptions.map((teacher) => (
+                <option key={teacher}>{teacher}</option>
+              ))}
+            </select>
+            <select
+              value={groupFilter}
+              onChange={(event) => setGroupFilter(event.target.value)}
+              className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-gold-500"
+            >
+              <option>All groups</option>
+              {groupOptions.map((group) => (
+                <option key={group}>{group}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-6">
+          <OpsStat label="Students" value={String(scopedStudents.length)} detail={`${teacherFilter} · ${groupFilter}`} tone="dark" />
+          <OpsStat label="Overall" value={`${kpi.avgOverall}%`} detail="Average student score" tone={kpi.avgOverall >= 80 ? "good" : "warn"} />
+          <OpsStat label="Performance" value={`${kpi.avgPerformance}%`} detail="Academic performance" tone={kpi.avgPerformance >= 80 ? "good" : "warn"} />
+          <OpsStat label="Attendance" value={`${kpi.attendancePct}%`} detail={`${kpi.present}/${kpi.monthRecords.length} present`} tone={kpi.attendancePct >= 85 ? "good" : "bad"} />
+          <OpsStat label="Homework" value={`${kpi.homework}%`} detail="Homework average" tone={kpi.homework >= 80 ? "good" : "warn"} />
+          <OpsStat label="At risk" value={String(kpi.lowAttendance.length + kpi.needsAcademicHelp.length)} detail="Attendance or academic" tone={kpi.lowAttendance.length + kpi.needsAcademicHelp.length ? "bad" : "good"} />
+        </div>
+
+        <div className="grid gap-5 border-t border-line p-5 xl:grid-cols-[1fr_420px]">
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-bold text-ink">
+                  <TrendingUp size={17} /> Monthly attendance trend
+                </h3>
+                <p className="mt-0.5 text-xs text-ink/45">Calculated from teacher attendance records.</p>
+              </div>
+              <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">
+                {kpi.activeDates.length || attendanceDates.length} class dates
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {attendanceTrend.map((item) => (
+                <div key={item.key} className="rounded-lg border border-line bg-cream/35 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-ink/60">{item.label}</p>
+                    <p className={item.pct >= 85 ? "text-sm font-bold text-emerald-700" : "text-sm font-bold text-red-600"}>
+                      {item.pct}%
+                    </p>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-line">
+                    <div
+                      className={item.pct >= 85 ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-red-500"}
+                      style={{ width: `${item.pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[11px] font-semibold text-ink/40">{item.total} records</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-cream/35">
+            <div className="border-b border-line px-4 py-3">
+              <h3 className="text-sm font-bold text-ink">Teacher breakdown</h3>
+              <p className="mt-0.5 text-xs text-ink/45">Filtered scope by teacher.</p>
+            </div>
+            <div className="divide-y divide-line">
+              {teacherBreakdown.map((item) => (
+                <div key={item.teacher} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">{item.teacher}</p>
+                      <p className="mt-0.5 text-xs text-ink/45">{item.count} students</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-ink">{item.overall}%</p>
+                      <p className="text-xs font-semibold text-ink/45">{item.attendance}% attendance</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {teacherBreakdown.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-ink/40">No teacher data in this filter.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-5 border-t border-line p-5 xl:grid-cols-2">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Lowest attendance this month</h3>
+            <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+              {kpi.lowAttendance.slice(0, 5).map((student) => {
+                const studentRecords = kpi.monthRecords.filter((record) => record.studentId === student.id);
+                const present = studentRecords.filter((record) => record.present).length;
+                const attendance = percent(present, studentRecords.length);
+                return (
+                  <div key={student.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">{student.name}</p>
+                      <p className="mt-0.5 text-xs text-ink/45">{student.teacher} · {student.klass}</p>
+                    </div>
+                    <p className="text-sm font-bold text-red-600">{attendance}%</p>
+                  </div>
+                );
+              })}
+              {kpi.lowAttendance.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-ink/40">No low attendance in this filter.</p>
+              )}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-ink">Academic follow-up</h3>
+            <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+              {kpi.needsAcademicHelp.slice(0, 5).map((student) => (
+                <div key={student.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{student.name}</p>
+                    <p className="mt-0.5 text-xs text-ink/45">{student.teacher} · {student.klass}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-amber-700">{student.overall}%</p>
+                    <p className="text-xs font-semibold text-ink/45">overall</p>
+                  </div>
+                </div>
+              ))}
+              {kpi.needsAcademicHelp.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-ink/40">No academic risk in this filter.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <section className="rounded-lg border border-line bg-white shadow-sm">

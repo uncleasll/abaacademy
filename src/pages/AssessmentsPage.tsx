@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileCheck2, FileDown, Save, Search } from "lucide-react";
 import { SectionTitle } from "../components/ui";
 import { assessmentCalendar, type AssessmentRecord, type QuarterKey } from "../data/mockData";
@@ -23,6 +23,18 @@ const emptyScores = {
 };
 
 const quickScores = [0, 60, 75, 85, 100];
+type AssessmentStatusFilter = "all" | "completed" | "needs-review" | "proficient";
+
+const assessmentMonths: Record<QuarterKey, string[]> = {
+  Q1: ["September", "October", "November"],
+  Q2: ["December", "January"],
+  Q3: ["February", "March"],
+  Final: ["April", "May", "June"],
+};
+
+function assessmentAverage(record: Omit<AssessmentRecord, "studentId" | "quarter" | "note">) {
+  return Math.round((record.islamicStudies + record.quranReading + record.tajweed + record.memorization + record.practical) / 5);
+}
 
 export function AssessmentsPage() {
   const { assessmentRecords, classGroups, students, updateAssessmentRecord, user } = useAcademy();
@@ -30,9 +42,16 @@ export function AssessmentsPage() {
   const teacherStudents = students.filter((student) => student.teacher === teacherName);
   const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
   const [quarter, setQuarter] = useState<QuarterKey>("Q1");
+  const [monthFilter, setMonthFilter] = useState("November");
   const [groupFilter, setGroupFilter] = useState("All groups");
+  const [statusFilter, setStatusFilter] = useState<AssessmentStatusFilter>("all");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("Quarterly assessment workspace is ready.");
+  const monthOptions = assessmentMonths[quarter];
+
+  useEffect(() => {
+    setMonthFilter(assessmentMonths[quarter].at(-1) ?? "");
+  }, [quarter]);
 
   const recordsByStudent = useMemo(() => {
     const map = new Map<string, AssessmentRecord>();
@@ -42,22 +61,31 @@ export function AssessmentsPage() {
     return map;
   }, [assessmentRecords, quarter]);
 
-  const rows = teacherStudents.filter((student) => {
+  const baseRows = teacherStudents.filter((student) => {
     const matchesGroup = groupFilter === "All groups" || student.klass === groupFilter;
     const matchesQuery = `${student.name} ${student.parentName} ${student.klass}`.toLowerCase().includes(query.toLowerCase());
     return matchesGroup && matchesQuery;
   });
 
+  const rows = baseRows.filter((student) => {
+    const record = recordsByStudent.get(student.id);
+    if (statusFilter === "completed") return Boolean(record);
+    const rowAverage = assessmentAverage(record ?? { ...emptyScores });
+    if (statusFilter === "needs-review") return rowAverage < 75;
+    if (statusFilter === "proficient") return rowAverage >= 75;
+    return true;
+  });
+
   const activeCalendar = assessmentCalendar.find((item) => item.key === quarter) ?? assessmentCalendar[0];
-  const completed = rows.filter((student) => recordsByStudent.has(student.id)).length;
+  const completed = baseRows.filter((student) => recordsByStudent.has(student.id)).length;
   const average = useMemo(() => {
-    const all = rows
+    const all = baseRows
       .map((student) => recordsByStudent.get(student.id))
       .filter(Boolean)
-      .map((record) => Math.round((record!.islamicStudies + record!.quranReading + record!.tajweed + record!.memorization + record!.practical) / 5));
+      .map((record) => assessmentAverage(record!));
     if (!all.length) return 0;
     return Math.round(all.reduce((sum, value) => sum + value, 0) / all.length);
-  }, [recordsByStudent, rows]);
+  }, [baseRows, recordsByStudent]);
 
   const saveScore = (studentId: string, patch: Partial<AssessmentRecord>) => {
     const scorePatch = Object.entries(patch).find(([key, value]) => key !== "note" && typeof value === "number");
@@ -83,12 +111,13 @@ export function AssessmentsPage() {
   const exportAssessments = () => {
     const exportRows = rows.map((student) => {
       const record = recordsByStudent.get(student.id) ?? { studentId: student.id, quarter, ...emptyScores };
-      const rowAverage = Math.round((record.islamicStudies + record.quranReading + record.tajweed + record.memorization + record.practical) / 5);
+      const rowAverage = assessmentAverage(record);
       return [
         student.name,
         student.klass,
         student.parentName,
         activeCalendar.label,
+        monthFilter,
         activeCalendar.window,
         record.islamicStudies,
         record.quranReading,
@@ -101,12 +130,13 @@ export function AssessmentsPage() {
       ];
     });
     const safeGroup = groupFilter === "All groups" ? "all-groups" : safeFilenamePart(groupFilter);
-    downloadCsv(`quarterly-assessments-${quarter.toLowerCase()}-${safeGroup}.csv`, [
+    downloadCsv(`quarterly-assessments-${quarter.toLowerCase()}-${safeFilenamePart(monthFilter)}-${safeGroup}-${statusFilter}.csv`, [
       [
         "Student",
         "Group",
         "Parent",
         "Quarter",
+        "Month",
         "Assessment Window",
         "Islamic Studies",
         "Qur'an Reading",
@@ -119,7 +149,7 @@ export function AssessmentsPage() {
       ],
       ...exportRows,
     ]);
-    setNotice(`${rows.length} ${rows.length === 1 ? "row" : "rows"} exported for ${activeCalendar.label}.`);
+    setNotice(`${rows.length} filtered ${rows.length === 1 ? "row" : "rows"} exported for ${monthFilter}.`);
   };
 
   return (
@@ -131,7 +161,7 @@ export function AssessmentsPage() {
           sub="Track Qur'an, tajweed, memorization, Islamic Studies, and practical assessment results from the 2026-2027 curriculum handbook."
         />
         <div className="rounded-xl border border-line bg-white px-4 py-3 text-sm font-semibold text-ink shadow-sm">
-          {activeCalendar.label} · {activeCalendar.window}
+          {activeCalendar.label} · {monthFilter}
         </div>
       </div>
 
@@ -143,7 +173,7 @@ export function AssessmentsPage() {
         </div>
         <div className="rounded-xl border border-line bg-white p-4 shadow-sm">
           <p className="text-xs font-semibold uppercase text-ink/45">Completed</p>
-          <p className="mt-2 text-2xl font-semibold text-ink">{completed}/{rows.length}</p>
+          <p className="mt-2 text-2xl font-semibold text-ink">{completed}/{baseRows.length}</p>
           <p className="mt-2 text-xs text-ink/50">Ready for report cards</p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-sm">
@@ -156,7 +186,7 @@ export function AssessmentsPage() {
       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
 
       <section className="rounded-xl border border-line bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[180px_210px_1fr_auto]">
+        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[170px_160px_190px_170px_1fr_auto]">
           <select
             value={quarter}
             onChange={(event) => setQuarter(event.target.value as QuarterKey)}
@@ -164,6 +194,15 @@ export function AssessmentsPage() {
           >
             {assessmentCalendar.map((item) => (
               <option key={item.key} value={item.key}>{item.label}</option>
+            ))}
+          </select>
+          <select
+            value={monthFilter}
+            onChange={(event) => setMonthFilter(event.target.value)}
+            className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+          >
+            {monthOptions.map((month) => (
+              <option key={month}>{month}</option>
             ))}
           </select>
           <select
@@ -175,6 +214,16 @@ export function AssessmentsPage() {
             {teacherGroups.map((group) => (
               <option key={group.id}>{group.name}</option>
             ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as AssessmentStatusFilter)}
+            className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+          >
+            <option value="all">All status</option>
+            <option value="completed">Completed only</option>
+            <option value="needs-review">Needs review</option>
+            <option value="proficient">Proficient</option>
           </select>
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35" size={17} />
@@ -211,7 +260,7 @@ export function AssessmentsPage() {
             <tbody>
               {rows.map((student) => {
                 const record = recordsByStudent.get(student.id) ?? { studentId: student.id, quarter, ...emptyScores };
-                const rowAverage = Math.round((record.islamicStudies + record.quranReading + record.tajweed + record.memorization + record.practical) / 5);
+                const rowAverage = assessmentAverage(record);
                 return (
                   <tr key={student.id} className="border-b border-line last:border-0 hover:bg-cream/50">
                     <td className="px-5 py-4">

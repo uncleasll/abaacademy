@@ -346,8 +346,8 @@ export function ApplicationsPage() {
         <IntakeStat label="Accepted" value={String(apps.filter((app) => app.status === "accepted").length)} detail="Ready for enrollment" tone="good" />
       </div>
 
-      <div className="grid gap-5">
-        <section className="order-1 rounded-lg border border-line bg-white shadow-sm">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
+        <section className="order-2 rounded-lg border border-line bg-white shadow-sm xl:order-1">
           <div className="border-b border-line px-5 py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -440,9 +440,8 @@ export function ApplicationsPage() {
           )}
         </section>
 
-        <div className="order-2">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+        <aside className="order-1 space-y-5 xl:sticky xl:top-5 xl:order-2 xl:self-start">
+          <section className="rounded-lg border border-line bg-white p-4 shadow-sm">
             <div className="mb-5 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-900 text-cream">
                 <UserRoundPlus size={19} />
@@ -453,7 +452,7 @@ export function ApplicationsPage() {
               </div>
             </div>
 
-            <form onSubmit={submit} className="space-y-4">
+            <form onSubmit={submit} className="space-y-3">
               <div className="rounded-lg border border-line bg-cream/45 p-3">
                 <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Student</p>
                 <div className="grid gap-3 sm:grid-cols-[1fr_88px]">
@@ -570,8 +569,7 @@ export function ApplicationsPage() {
               </p>
             )}
           </section>
-          </div>
-        </div>
+        </aside>
       </div>
     </div>
   );
