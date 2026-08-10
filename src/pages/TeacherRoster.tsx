@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ClipboardCheck,
   Copy,
+  FileDown,
   Save,
   Search,
   Send,
@@ -16,6 +17,7 @@ import {
 import { AttendancePill, HwPill } from "../components/ui";
 import { type AttendanceStatus, type HwStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
+import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
 
 const attendanceOptions: { value: AttendanceStatus; label: string }[] = [
   { value: "present", label: "Present" },
@@ -212,6 +214,27 @@ Demo bot preview only.`;
     setNotice("Demo Telegram bot message queued.");
   };
 
+  const exportSession = () => {
+    downloadCsv(`attendance-${sessionDate}-${safeFilenamePart(groupFilter)}.csv`, [
+      ["Date", "Teacher", "Group", "Student", "Parent", "Phone", "Attendance", "Homework", "Stars", "Next Homework", "Enrollment Status", "Finance Note"],
+      ...visibleRows.map((student) => [
+        sessionDate,
+        teacherName,
+        student.klass,
+        student.name,
+        student.parentName,
+        student.parentPhone,
+        student.attendance,
+        student.hw,
+        student.stars,
+        student.nextHwDraft || "",
+        student.enrollmentStatus ?? "active",
+        student.terminationNote || student.financeNote || "",
+      ]),
+    ]);
+    setNotice(`${visibleRows.length} attendance rows exported for ${sessionDate}.`);
+  };
+
   const toggleExpanded = (id: string) => {
     setExpandedRows((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
@@ -304,6 +327,14 @@ Demo bot preview only.`;
               >
                 {sessionState === "not_started" ? <ClipboardCheck size={16} /> : saved ? <Check size={16} /> : <Save size={16} />}
                 {sessionState === "not_started" ? "Start class" : saved ? "Saved" : "Save class"}
+              </button>
+              <button
+                type="button"
+                onClick={exportSession}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-green-800 bg-white px-4 py-2.5 text-sm font-semibold text-green-900 hover:bg-cream"
+              >
+                <FileDown size={16} />
+                Export Excel
               </button>
             </div>
             <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/55">{notice}</p>

@@ -3,6 +3,7 @@ import { FileCheck2, FileDown, Save, Search } from "lucide-react";
 import { SectionTitle } from "../components/ui";
 import { assessmentCalendar, type AssessmentRecord, type QuarterKey } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
+import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
 
 const scoreFields: { key: keyof Omit<AssessmentRecord, "studentId" | "quarter" | "note">; label: string }[] = [
   { key: "islamicStudies", label: "Islamic Studies" },
@@ -22,25 +23,6 @@ const emptyScores = {
 };
 
 const quickScores = [0, 60, 75, 85, 100];
-
-function csvCell(value: string | number) {
-  const text = String(value);
-  if (!/[",\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function downloadCsv(filename: string, rows: (string | number)[][]) {
-  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
 
 export function AssessmentsPage() {
   const { assessmentRecords, classGroups, students, updateAssessmentRecord, user } = useAcademy();
@@ -118,7 +100,7 @@ export function AssessmentsPage() {
         rowAverage >= 75 ? "Proficient" : "Needs review",
       ];
     });
-    const safeGroup = groupFilter === "All groups" ? "all-groups" : groupFilter.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const safeGroup = groupFilter === "All groups" ? "all-groups" : safeFilenamePart(groupFilter);
     downloadCsv(`quarterly-assessments-${quarter.toLowerCase()}-${safeGroup}.csv`, [
       [
         "Student",

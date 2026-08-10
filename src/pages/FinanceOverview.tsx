@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useAcademy } from "../data/academyStore";
 import type { MonthlyPaymentStatus, PaymentStatus, Student } from "../data/mockData";
+import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -87,7 +88,6 @@ export function FinanceOverview() {
     tuitionMonths,
     tuitionRecords,
     queueReminder,
-    downloadFinanceExport,
     downloadReceipts,
     reconcileFinance,
     updateTuitionRecord,
@@ -188,6 +188,52 @@ export function FinanceOverview() {
     void queueReminder({ scope: "finance-contact-today", month: monthFilter, studentIds: contactQueue.map((student) => student.id) });
     setReminded(contactQueue.map((student) => student.id));
     setNotice(`${contactQueue.length} contactable reminders queued. Terminated students were excluded.`);
+  };
+
+  const exportContactQueue = () => {
+    downloadCsv(`finance-contact-${safeFilenamePart(monthFilter)}-${safeFilenamePart(statusFilter)}.csv`, [
+      ["Student", "Teacher", "Group", "Parent", "Phone", "Month", "Balance", "Status", "Missed Recent Classes", "Suggested Action", "Finance Note"],
+      ...contactQueue.map((student) => {
+        const missed = missedMap.get(student.id)?.missed ?? 0;
+        const monthRecord = tuitionMap.get(`${student.id}:${monthFilter}`);
+        const monthDue = monthRecord?.status === "paid" ? 0 : student.amountDue || Math.max(0, 450 - (monthRecord?.amount ?? 0));
+        const suggestedAction = missed >= 3 ? "Call before reminder" : student.tuitionStatus === "overdue" ? "Payment reminder" : "Friendly follow-up";
+        return [
+          student.name,
+          student.teacher,
+          student.klass,
+          student.parentName,
+          student.parentPhone,
+          monthFilter,
+          monthDue,
+          student.tuitionStatus,
+          missed,
+          suggestedAction,
+          student.terminationNote || student.financeNote || "",
+        ];
+      }),
+    ]);
+    setNotice(`${contactQueue.length} contact queue rows exported.`);
+  };
+
+  const exportTuitionMatrix = () => {
+    downloadCsv(`finance-matrix-${safeFilenamePart(teacherFilter)}-${safeFilenamePart(groupFilter)}.csv`, [
+      ["Student", "Teacher", "Group", "Parent", "Phone", "Joined", ...tuitionMonths.flatMap((month) => [`${month} Status`, `${month} Amount`])],
+      ...scopedStudents.map((student) => [
+        student.name,
+        student.teacher,
+        student.klass,
+        student.parentName,
+        student.parentPhone,
+        student.joinedDate || "",
+        ...tuitionMonths.flatMap((month) => {
+          const record = tuitionMap.get(`${student.id}:${month}`) ?? { status: "unpaid", amount: 0 };
+          const effectiveStatus = student.enrollmentStatus === "terminated" ? "absent" : record.status;
+          return [effectiveStatus, record.amount];
+        }),
+      ]),
+    ]);
+    setNotice(`${scopedStudents.length} finance matrix rows exported.`);
   };
 
   const runAction = async (key: string, action: () => Promise<void>) => {
@@ -404,16 +450,11 @@ export function FinanceOverview() {
             <div className="mt-4 grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  void runAction("export", async () => {
-                    await downloadFinanceExport();
-                    setNotice("Tuition report CSV downloaded.");
-                  })
-                }
+                onClick={exportContactQueue}
                 disabled={workingAction === "export"}
                 className="flex items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs font-semibold text-ink/65 hover:border-gold-500 hover:text-gold-600"
               >
-                <Download size={14} /> {workingAction === "export" ? "Exporting" : "Export"}
+                <Download size={14} /> Contact export
               </button>
               <button
                 type="button"
@@ -479,6 +520,13 @@ export function FinanceOverview() {
             <p className="mt-0.5 text-sm text-ink/45">Secondary editing view for all monthly payment cells.</p>
           </div>
           <span className="rounded-lg bg-cream px-3 py-2 text-xs font-semibold text-ink/50">{tuitionMonths.length} program months · July/Aug off</span>
+          <button
+            type="button"
+            onClick={exportTuitionMatrix}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
+          >
+            <Download size={14} /> Export Excel
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1360px] w-full text-left text-sm">

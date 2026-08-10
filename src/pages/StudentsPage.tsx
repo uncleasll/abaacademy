@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { CheckSquare, Filter, Phone, Search, UserRound } from "lucide-react";
+import { CheckSquare, FileDown, Filter, Phone, Search, UserRound } from "lucide-react";
 import { AttendancePill, PaymentPill, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
+import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
 
 function DirectoryStat({
   label,
@@ -91,6 +92,50 @@ export function StudentsPage() {
     return `${value.getMonth() + 1}/${value.getDate()}/${String(value.getFullYear()).slice(2)}`;
   };
 
+  const exportStudents = () => {
+    const attendanceColumns = attendanceDates.map((date) => `Attendance ${dateLabel(date)}`);
+    downloadCsv(`students-${safeFilenamePart(teacherFilter)}-${safeFilenamePart(groupFilter)}-${safeFilenamePart(riskFilter)}.csv`, [
+      [
+        "Student",
+        "Age",
+        "Teacher",
+        "Group",
+        "Parent",
+        "Phone",
+        "Address",
+        "Attendance %",
+        "Current Attendance",
+        "Tuition Status",
+        "Amount Due",
+        "Performance",
+        "Homework Avg",
+        "Overall",
+        "Status",
+        "Enrollment Status",
+        ...attendanceColumns,
+      ],
+      ...sorted.map((student) => [
+        student.name,
+        student.age,
+        student.teacher,
+        student.klass,
+        student.parentName,
+        student.parentPhone,
+        student.address,
+        `${student.attendancePct}%`,
+        student.attendance,
+        student.tuitionStatus,
+        student.amountDue,
+        `${student.performance}%`,
+        `${student.homeworkAvg}%`,
+        `${student.overall}%`,
+        student.status,
+        student.enrollmentStatus ?? "active",
+        ...attendanceDates.map((date) => (attendanceMap.get(`${student.id}:${date}`) ? "Present" : "Absent")),
+      ]),
+    ]);
+  };
+
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-line bg-white shadow-sm">
@@ -145,7 +190,7 @@ export function StudentsPage() {
                   ))}
                 </select>
               </div>
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
                 <select
                   value={riskFilter}
                   onChange={(event) => setRiskFilter(event.target.value)}
@@ -161,6 +206,14 @@ export function StudentsPage() {
                   className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
                 >
                   Clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={exportStudents}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-3 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
+                >
+                  <FileDown size={16} />
+                  Export Excel
                 </button>
               </div>
             </div>

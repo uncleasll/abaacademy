@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Bell, Check, CreditCard, Search } from "lucide-react";
+import { Bell, Check, CreditCard, FileDown, Search } from "lucide-react";
 import { PaymentPill, SectionTitle } from "../components/ui";
 import { type PaymentStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
+import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -51,6 +52,22 @@ export function TuitionPage() {
     setNotice(`Reminder queued for ${name}'s family.`);
   };
 
+  const exportTuition = () => {
+    downloadCsv(`tuition-${safeFilenamePart(statusFilter)}.csv`, [
+      ["Student", "Group", "Parent", "Phone", "Address", "Balance", "Status"],
+      ...visibleRows.map((student) => [
+        student.name,
+        student.klass,
+        student.parentName,
+        student.parentPhone,
+        student.address,
+        student.amountDue,
+        student.tuitionStatus,
+      ]),
+    ]);
+    setNotice(`${visibleRows.length} tuition rows exported.`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -59,17 +76,26 @@ export function TuitionPage() {
           title="Tuition & payments"
           sub="A clean payment workspace for family balances and follow-ups."
         />
-        <button
-          onClick={() => {
-            const payable = rows.filter((student) => student.tuitionStatus !== "paid");
-            void queueReminder({ scope: "tuition-all", studentIds: payable.map((student) => student.id) });
-            setReminded(payable.map((student) => student.id));
-            setNotice(`${payable.length} payment reminders queued.`);
-          }}
-          className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
-        >
-          <Bell size={16} /> Remind all due
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={exportTuition}
+            className="inline-flex items-center gap-2 rounded-lg border border-green-800 bg-white px-4 py-2.5 text-sm font-semibold text-green-900 hover:bg-cream"
+          >
+            <FileDown size={16} /> Export Excel
+          </button>
+          <button
+            onClick={() => {
+              const payable = rows.filter((student) => student.tuitionStatus !== "paid");
+              void queueReminder({ scope: "tuition-all", studentIds: payable.map((student) => student.id) });
+              setReminded(payable.map((student) => student.id));
+              setNotice(`${payable.length} payment reminders queued.`);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
+          >
+            <Bell size={16} /> Remind all due
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
