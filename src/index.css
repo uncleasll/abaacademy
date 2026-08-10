@@ -54,6 +54,16 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
+.score-input::-webkit-outer-spin-button,
+.score-input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.score-input[type="number"] {
+  appearance: textfield;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

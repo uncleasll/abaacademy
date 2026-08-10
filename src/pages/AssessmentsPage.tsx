@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FileCheck2, Save, Search } from "lucide-react";
+import { FileCheck2, FileDown, Save, Search } from "lucide-react";
 import { SectionTitle } from "../components/ui";
 import { assessmentCalendar, type AssessmentRecord, type QuarterKey } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
@@ -20,6 +20,27 @@ const emptyScores = {
   practical: 0,
   note: "",
 };
+
+const quickScores = [0, 60, 75, 85, 100];
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  if (!/[",\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function AssessmentsPage() {
   const { assessmentRecords, classGroups, students, updateAssessmentRecord, user } = useAcademy();
@@ -68,6 +89,57 @@ export function AssessmentsPage() {
     setNotice(`${quarter} assessment saved.`);
   };
 
+  const saveScoreValue = (
+    studentId: string,
+    key: keyof Omit<AssessmentRecord, "studentId" | "quarter" | "note">,
+    value: string,
+  ) => {
+    if (value === "") return;
+    saveScore(studentId, { [key]: Number(value) });
+  };
+
+  const exportAssessments = () => {
+    const exportRows = rows.map((student) => {
+      const record = recordsByStudent.get(student.id) ?? { studentId: student.id, quarter, ...emptyScores };
+      const rowAverage = Math.round((record.islamicStudies + record.quranReading + record.tajweed + record.memorization + record.practical) / 5);
+      return [
+        student.name,
+        student.klass,
+        student.parentName,
+        activeCalendar.label,
+        activeCalendar.window,
+        record.islamicStudies,
+        record.quranReading,
+        record.tajweed,
+        record.memorization,
+        record.practical,
+        `${rowAverage}%`,
+        record.note,
+        rowAverage >= 75 ? "Proficient" : "Needs review",
+      ];
+    });
+    const safeGroup = groupFilter === "All groups" ? "all-groups" : groupFilter.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    downloadCsv(`quarterly-assessments-${quarter.toLowerCase()}-${safeGroup}.csv`, [
+      [
+        "Student",
+        "Group",
+        "Parent",
+        "Quarter",
+        "Assessment Window",
+        "Islamic Studies",
+        "Qur'an Reading",
+        "Tajweed",
+        "Memorization",
+        "Practical",
+        "Average",
+        "Teacher Note",
+        "Status",
+      ],
+      ...exportRows,
+    ]);
+    setNotice(`${rows.length} ${rows.length === 1 ? "row" : "rows"} exported for ${activeCalendar.label}.`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -102,7 +174,7 @@ export function AssessmentsPage() {
       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
 
       <section className="rounded-xl border border-line bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[180px_210px_1fr]">
+        <div className="grid gap-3 border-b border-line p-4 lg:grid-cols-[180px_210px_1fr_auto]">
           <select
             value={quarter}
             onChange={(event) => setQuarter(event.target.value as QuarterKey)}
@@ -131,10 +203,18 @@ export function AssessmentsPage() {
               className="w-full rounded-lg border border-line bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-gold-500"
             />
           </label>
+          <button
+            type="button"
+            onClick={exportAssessments}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-green-800 bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream shadow-sm transition hover:bg-green-800"
+          >
+            <FileDown size={17} />
+            Export Excel
+          </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-[1280px] w-full text-left text-sm">
+          <table className="min-w-[1440px] w-full text-left text-sm">
             <thead>
               <tr className="border-b border-line bg-green-900 text-xs uppercase text-cream/80">
                 <th className="px-5 py-3 font-semibold">Student</th>
@@ -157,15 +237,30 @@ export function AssessmentsPage() {
                       <p className="mt-1 text-xs text-ink/45">{student.klass} · {student.parentName}</p>
                     </td>
                     {scoreFields.map((field) => (
-                      <td key={field.key} className="px-3 py-4">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={record[field.key]}
-                          onChange={(event) => saveScore(student.id, { [field.key]: Number(event.target.value) })}
-                          className="w-20 rounded-lg border border-line bg-white px-2 py-2 text-right text-sm font-semibold outline-none focus:border-gold-500"
-                        />
+                      <td key={field.key} className="px-3 py-4 align-top">
+                        <div className="flex w-28 overflow-hidden rounded-lg border border-line bg-white focus-within:border-gold-500 focus-within:ring-2 focus-within:ring-gold-500/25">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            inputMode="numeric"
+                            value={record[field.key]}
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => saveScoreValue(student.id, field.key, event.target.value)}
+                            className="score-input min-h-10 w-14 border-0 bg-white px-2 text-center text-base font-semibold outline-none"
+                          />
+                          <select
+                            aria-label={`${field.label} quick score for ${student.name}`}
+                            value={record[field.key]}
+                            onChange={(event) => saveScore(student.id, { [field.key]: Number(event.target.value) })}
+                            className="min-h-10 w-14 border-0 border-l border-line bg-cream px-1 text-xs font-semibold text-ink/70 outline-none"
+                          >
+                            {!quickScores.includes(record[field.key]) && <option value={record[field.key]}>{record[field.key]}</option>}
+                            {quickScores.map((score) => (
+                              <option key={score} value={score}>{score}</option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                     ))}
                     <td className="px-3 py-4">
