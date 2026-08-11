@@ -157,6 +157,38 @@ export function AdminOverview() {
     [kpi.monthRecords, scopedStudents, teacherOptions]
   );
 
+  const rankedStudents = useMemo(() => {
+    const recordsByStudent = new Map<string, typeof attendanceRecords>();
+    kpi.monthRecords.forEach((record) => {
+      const records = recordsByStudent.get(record.studentId) ?? [];
+      records.push(record);
+      recordsByStudent.set(record.studentId, records);
+    });
+    return scopedStudents
+      .map((student) => {
+        const records = recordsByStudent.get(student.id) ?? [];
+        const attendance = records.length
+          ? percent(records.filter((record) => record.present).length, records.length)
+          : student.attendancePct;
+        const score = Math.round((student.overall * 0.4) + (student.performance * 0.25) + (student.homeworkAvg * 0.2) + (attendance * 0.15));
+        const riskReason =
+          attendance < 80
+            ? "Attendance support"
+            : student.overall < 75
+              ? "Academic support"
+              : student.homeworkAvg < 75
+                ? "Homework support"
+                : "Monitor progress";
+        return { student, attendance, score, riskReason };
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [attendanceRecords, kpi.monthRecords, scopedStudents]);
+
+  const topPerformers = rankedStudents.slice(0, 5);
+  const needsSupport = [...rankedStudents]
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 5);
+
   const operations = useMemo(() => {
     const missedStats = students
       .map((student) => {
@@ -388,6 +420,59 @@ export function AdminOverview() {
               ))}
               {teacherBreakdown.length === 0 && (
                 <p className="px-4 py-8 text-center text-sm text-ink/40">No teacher data in this filter.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-5 border-t border-line p-5 xl:grid-cols-2">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Top 5 performers</h3>
+            <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+              {topPerformers.map((item, index) => (
+                <div key={item.student.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[32px_1fr_auto] sm:items-center">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-sm font-bold text-emerald-700">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{item.student.name}</p>
+                    <p className="mt-0.5 text-xs text-ink/45">
+                      {item.student.teacher} · {item.student.klass} · {item.attendance}% attendance
+                    </p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-bold text-emerald-700">{item.score}%</p>
+                    <p className="text-xs font-semibold text-ink/45">overall rank</p>
+                  </div>
+                </div>
+              ))}
+              {topPerformers.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-ink/40">No students in this filter.</p>
+              )}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-ink">Needs support 5</h3>
+            <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+              {needsSupport.map((item, index) => (
+                <div key={item.student.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[32px_1fr_auto] sm:items-center">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-sm font-bold text-amber-700">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{item.student.name}</p>
+                    <p className="mt-0.5 text-xs text-ink/45">
+                      {item.student.teacher} · {item.student.klass} · {item.riskReason}
+                    </p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-bold text-amber-700">{item.score}%</p>
+                    <p className="text-xs font-semibold text-ink/45">{item.attendance}% attendance</p>
+                  </div>
+                </div>
+              ))}
+              {needsSupport.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-ink/40">No support list in this filter.</p>
               )}
             </div>
           </div>
