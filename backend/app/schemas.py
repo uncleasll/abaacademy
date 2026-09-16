@@ -114,9 +114,14 @@ class StaffUserCreate(BaseModel):
     email: EmailStr
 
 
+class PasswordChangeRequest(BaseModel):
+    currentPassword: str = Field(min_length=1, max_length=128)
+    newPassword: str = Field(min_length=12, max_length=128)
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class AuthUser(BaseModel):

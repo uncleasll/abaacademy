@@ -14,6 +14,13 @@ TOKEN_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "43200"))
 JWT_SECRET = os.getenv("JWT_SECRET", "change-this-secret-before-production")
 
 
+def validate_security_config() -> None:
+    if os.getenv("APP_ENV", "development").lower() == "production" and (
+        JWT_SECRET == "change-this-secret-before-production" or len(JWT_SECRET) < 32
+    ):
+        raise RuntimeError("Production requires a random JWT_SECRET of at least 32 characters")
+
+
 def _b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 

@@ -77,10 +77,12 @@ export function RegistrationDirectory() {
     const name = teacherName.trim();
     const email = teacherEmail.trim();
     if (!name || !email) return;
-    await createUser({ name, email, role: "Teacher" });
+    try {
+    const created = await createUser({ name, email, role: "Teacher" });
     setTeacherName("");
     setTeacherEmail("");
-    setNotice(`${name} added as a teacher account.`);
+    setNotice(`Account: ${created.email} — Temporary password: ${created.temporaryPassword}. Save it now and share privately; change required at first login.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not create teacher."); }
   };
 
   const removeTeacher = (id: string, name: string) => {

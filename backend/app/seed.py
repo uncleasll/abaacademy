@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from .database import connect
 from .security import hash_password
 
@@ -72,6 +74,35 @@ def seed_if_empty() -> None:
         count = conn.execute("SELECT COUNT(*) AS count FROM students").fetchone()["count"]
         auth_count = conn.execute("SELECT COUNT(*) AS count FROM auth_accounts").fetchone()["count"]
         attendance_count = conn.execute("SELECT COUNT(*) AS count FROM attendance_records").fetchone()["count"]
+        seed_demo_data = os.getenv("SEED_DEMO_DATA", "false" if os.getenv("APP_ENV") == "production" else "true").lower() in {"1", "true", "yes"}
+        if not seed_demo_data:
+            if auth_count:
+                return
+            admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+            admin_password = os.getenv("ADMIN_PASSWORD", "")
+            admin_name = os.getenv("ADMIN_NAME", "ABA Academy Admin").strip()
+            if not admin_email or len(admin_password) < 12:
+                raise RuntimeError(
+                    "Production bootstrap requires ADMIN_EMAIL and ADMIN_PASSWORD (minimum 12 characters)"
+                )
+            password_hash, password_salt = hash_password(admin_password)
+            conn.execute(
+                "INSERT INTO staff_users VALUES (?, ?, ?, ?, ?, ?)",
+                ("u-initial-admin", admin_name, "IT Admin", admin_email, "active", "Never"),
+            )
+            conn.execute(
+                "INSERT INTO auth_accounts (id, staff_user_id, email, password_hash, password_salt, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "auth-initial-admin",
+                    "u-initial-admin",
+                    admin_email,
+                    password_hash,
+                    password_salt,
+                    "IT Admin",
+                    "active",
+                ),
+            )
+            return
         if count and not attendance_count:
             student_rows = conn.execute("SELECT id, attendance, attendance_pct, tuition_status FROM students").fetchall()
             for student in student_rows:
@@ -103,7 +134,7 @@ def seed_if_empty() -> None:
             for row in staff_rows:
                 password_hash, password_salt = hash_password(AUTH_PASSWORDS.get(row["email"], "TempPass123!"))
                 conn.execute(
-                    "INSERT OR IGNORE INTO auth_accounts VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO auth_accounts (id, staff_user_id, email, password_hash, password_salt, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (f"auth-{row['id']}", row["id"], row["email"], password_hash, password_salt, row["role"], row["status"]),
                 )
             return
@@ -135,7 +166,7 @@ def seed_if_empty() -> None:
         for user_id, _, role, email, status, _ in USERS:
             password_hash, password_salt = hash_password(AUTH_PASSWORDS[email])
             conn.execute(
-                "INSERT INTO auth_accounts VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO auth_accounts (id, staff_user_id, email, password_hash, password_salt, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (f"auth-{user_id}", user_id, email, password_hash, password_salt, role, status),
             )
         conn.executemany(

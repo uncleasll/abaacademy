@@ -13,6 +13,7 @@ import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { RegistrationDirectory } from "./pages/RegistrationDirectory";
 import { AcademyProvider, useAcademy } from "./data/academyStore";
+import { PasswordPage } from "./pages/PasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 
 export type Role = "IT Admin" | "Finance" | "Teacher" | "Registration";
@@ -71,6 +72,7 @@ function AuthenticatedApp() {
   }
 
   if (!isAuthenticated) return <LoginPage />;
+  if (user?.mustChangePassword) return <PasswordPage required />;
 
   return (
     <div className="flex h-dvh overflow-hidden bg-cream">

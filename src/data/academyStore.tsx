@@ -1,14 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  applications as fallbackApplications,
-  assessmentRecords as fallbackAssessmentRecords,
-  attendanceDates as fallbackAttendanceDates,
-  attendanceRecords as fallbackAttendanceRecords,
-  classGroups as fallbackClassGroups,
-  staffUsers as fallbackStaffUsers,
-  students as fallbackStudents,
-  tuitionMonths as fallbackTuitionMonths,
-  tuitionRecords as fallbackTuitionRecords,
   type Application,
   type AssessmentRecord,
   type AttendanceRecord,
@@ -45,6 +36,7 @@ export interface AuthUser {
   email: string;
   role: StaffUser["role"];
   status: StaffUser["status"];
+  mustChangePassword: boolean;
 }
 
 interface AcademyStore extends BootstrapData {
@@ -55,6 +47,7 @@ interface AcademyStore extends BootstrapData {
   user: AuthUser | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateStudent: (id: string, patch: Partial<Student>) => Promise<Student | undefined>;
@@ -63,7 +56,7 @@ interface AcademyStore extends BootstrapData {
   updateAssessmentRecord: (record: AssessmentRecord) => Promise<void>;
   createApplication: (payload: Omit<Application, "id" | "submitted" | "status">) => Promise<Application>;
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
-  createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser>;
+  createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser & { temporaryPassword: string }>;
   updateUserStatus: (id: string, status: StaffUser["status"]) => Promise<StaffUser | undefined>;
   deleteUser: (id: string) => Promise<void>;
   createMeeting: (payload: Omit<Meeting, "id">) => Promise<Meeting>;
@@ -80,19 +73,8 @@ const TOKEN_KEY = "aba_academy_token";
 const USER_KEY = "aba_academy_user";
 
 const fallbackData: BootstrapData = {
-  students: fallbackStudents,
-  applications: fallbackApplications,
-  classGroups: fallbackClassGroups,
-  staffUsers: fallbackStaffUsers,
-  attendanceDates: fallbackAttendanceDates,
-  attendanceRecords: fallbackAttendanceRecords,
-  tuitionMonths: fallbackTuitionMonths,
-  tuitionRecords: fallbackTuitionRecords,
-  assessmentRecords: fallbackAssessmentRecords,
-  meetings: [
-    { id: "m-a2", applicantId: "a2", day: "Monday", time: "9:00 AM", type: "Assessment" },
-    { id: "m-a3", applicantId: "a3", day: "Monday", time: "10:30 AM", type: "Interview" },
-  ],
+  students: [], applications: [], classGroups: [], staffUsers: [], meetings: [],
+  attendanceDates: [], attendanceRecords: [], tuitionMonths: [], tuitionRecords: [], assessmentRecords: [],
 };
 
 const AcademyContext = createContext<AcademyStore | null>(null);
@@ -119,7 +101,8 @@ async function request<T>(path: string, init?: RequestInit, authToken?: string |
     },
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    const body = await response.json().catch(() => null);
+    throw new Error(`${response.status} ${typeof body?.detail === "string" ? body.detail : response.statusText}`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -191,7 +174,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       .then((activeUser) => {
         setUser(activeUser);
         localStorage.setItem(USER_KEY, JSON.stringify(activeUser));
-        return refresh(token);
+        if (!activeUser.mustChangePassword) return refresh(token);
       })
       .catch(() => clearSession())
       .finally(() => setAuthLoading(false));
@@ -208,7 +191,17 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       setToken(result.token);
       setUser(result.user);
       setApiOnline(true);
-      await refresh(result.token);
+      if (!result.user.mustChangePassword) await refresh(result.token);
+    };
+
+    const changePassword: AcademyStore["changePassword"] = async (currentPassword, newPassword) => {
+      const result = await request<{ token: string; user: AuthUser }>("/api/auth/change-password", {
+        method: "POST", body: JSON.stringify({ currentPassword, newPassword }),
+      }, token);
+      localStorage.setItem(TOKEN_KEY, result.token);
+      localStorage.setItem(USER_KEY, JSON.stringify(result.user));
+      setUser(result.user);
+      setToken(result.token);
     };
 
     const logout: AcademyStore["logout"] = async () => {
@@ -352,23 +345,13 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     };
 
     const createUser: AcademyStore["createUser"] = async (payload) => {
-      const optimistic: StaffUser = { ...payload, id: `u-${Date.now()}`, status: "active", lastActive: "Just now" };
-      setData((prev) => ({ ...prev, staffUsers: [optimistic, ...prev.staffUsers] }));
-      try {
-        const created = await request<StaffUser>("/api/users", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setApiOnline(true);
-        setData((prev) => ({
-          ...prev,
-          staffUsers: prev.staffUsers.map((user) => (user.id === optimistic.id ? created : user)),
-        }));
-        return created;
-      } catch {
-        setApiOnline(false);
-        return optimistic;
-      }
+      const created = await request<StaffUser & { temporaryPassword: string }>("/api/users", {
+        method: "POST", body: JSON.stringify(payload),
+      });
+      const { temporaryPassword: _, ...staffUser } = created;
+      setApiOnline(true);
+      setData(prev => ({ ...prev, staffUsers: [staffUser, ...prev.staffUsers] }));
+      return created;
     };
 
     const updateUserStatus: AcademyStore["updateUserStatus"] = async (id, status) => {
@@ -500,6 +483,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       user,
       isAuthenticated: Boolean(token && user),
       login,
+      changePassword,
       logout,
       refresh,
       updateStudent,

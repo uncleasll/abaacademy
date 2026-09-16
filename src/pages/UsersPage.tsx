@@ -15,7 +15,7 @@ export function UsersPage() {
   const { staffUsers: users, createUser, deleteUser, updateUserStatus } = useAcademy();
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [notice, setNotice] = useState("Role changes are saved locally for this session.");
+  const [notice, setNotice] = useState("Manage staff accounts. New users must change their temporary password at first login.");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -28,14 +28,16 @@ export function UsersPage() {
 
   const addUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await createUser({
+    try {
+    const created = await createUser({
       name: form.name.trim(),
       email: form.email.trim(),
       role: form.role,
     });
-    setNotice(`Invite created for ${form.name.trim()}.`);
+    setNotice(`Account: ${created.email} — Temporary password: ${created.temporaryPassword}. Save it now and share privately; the user must change it at first login.`);
     setForm({ name: "", email: "", role: "Teacher" });
     setShowForm(false);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not create user."); }
   };
 
   const toggleStatus = (user: StaffUser) => {

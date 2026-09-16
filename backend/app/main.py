@@ -4,6 +4,7 @@ from datetime import date
 import csv
 import io
 import os
+import secrets
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -16,6 +17,7 @@ from .schemas import (
     AssessmentRecordPatch,
     AttendanceRecordPatch,
     LoginRequest,
+    PasswordChangeRequest,
     MeetingCreate,
     StaffUserCreate,
     StatusPatch,
@@ -23,7 +25,8 @@ from .schemas import (
     TuitionRecordPatch,
 )
 from .seed import seed_if_empty
-from .security import create_token, decode_token, hash_password, verify_password
+from .provision_teachers import provision_from_env
+from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
 
@@ -52,8 +55,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup() -> None:
+    validate_security_config()
     init_db()
     seed_if_empty()
+    provision_from_env()
 
 
 def student_row(row):
@@ -145,6 +150,7 @@ def auth_user_row(row):
         "email": data["email"],
         "role": data["role"],
         "status": data["status"],
+        "mustChangePassword": bool(data["must_change_password"]),
     }
 
 
@@ -249,7 +255,9 @@ def enroll_accepted_application(conn, application) -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    with connect() as conn:
+        conn.execute("SELECT 1").fetchone()
+    return {"status": "ok", "database": "connected"}
 
 
 def get_current_user(authorization: str | None = Header(default=None)):
@@ -264,7 +272,7 @@ def get_current_user(authorization: str | None = Header(default=None)):
         row = conn.execute(
             """
             SELECT auth_accounts.staff_user_id, staff_users.name, auth_accounts.email,
-                   auth_accounts.role, auth_accounts.status
+                   auth_accounts.role, auth_accounts.status, auth_accounts.must_change_password, auth_accounts.token_version
             FROM auth_accounts
             JOIN staff_users ON staff_users.id = auth_accounts.staff_user_id
             WHERE auth_accounts.staff_user_id = ? AND auth_accounts.email = ?
@@ -273,11 +281,19 @@ def get_current_user(authorization: str | None = Header(default=None)):
         ).fetchone()
     if not row or row["status"] != "active":
         raise HTTPException(status_code=401, detail="Account is inactive")
+    if payload.get("version", 0) != row["token_version"]:
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
     return auth_user_row(row)
 
 
+def get_ready_user(user=Depends(get_current_user)):
+    if user["mustChangePassword"]:
+        raise HTTPException(status_code=403, detail="Change your temporary password first")
+    return user
+
+
 def require_roles(*roles: str):
-    def dependency(user=Depends(get_current_user)):
+    def dependency(user=Depends(get_ready_user)):
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
@@ -306,10 +322,30 @@ def login(payload: LoginRequest):
         if row["status"] != "active":
             raise HTTPException(status_code=403, detail="Account is inactive")
         user = auth_user_row(row)
-        token = create_token({"sub": user["id"], "email": user["email"], "role": user["role"], "name": user["name"]})
+        token = create_token({"sub": user["id"], "email": user["email"], "role": user["role"], "name": user["name"], "version": row["token_version"]})
         conn.execute("UPDATE staff_users SET last_active = ? WHERE id = ?", ("Just now", user["id"]))
     audit("auth.login", {"userId": user["id"], "role": user["role"]})
     return {"token": token, "user": user}
+
+
+@app.post("/api/auth/change-password")
+def change_password(payload: PasswordChangeRequest, user=Depends(get_current_user)):
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM auth_accounts WHERE staff_user_id = ?", (user["id"],)).fetchone()
+        if not verify_password(payload.currentPassword, row["password_hash"], row["password_salt"]):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        if payload.newPassword == payload.currentPassword:
+            raise HTTPException(status_code=400, detail="Choose a different password")
+        password_hash, salt = hash_password(payload.newPassword)
+        updated = conn.execute(
+            "UPDATE auth_accounts SET password_hash = ?, password_salt = ?, must_change_password = 0, token_version = token_version + 1 WHERE staff_user_id = ? AND token_version = ?",
+            (password_hash, salt, user["id"], row["token_version"]),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Password changed in another session. Sign in again.")
+    audit("auth.password_changed", {"userId": user["id"]})
+    user = {**user, "mustChangePassword": False}
+    return {"user": user, "token": create_token({"sub": user["id"], "email": user["email"], "version": row["token_version"] + 1})}
 
 
 @app.get("/api/auth/me")
@@ -324,7 +360,7 @@ def logout(user=Depends(get_current_user)):
 
 
 @app.get("/api/bootstrap")
-def bootstrap(user=Depends(get_current_user)):
+def bootstrap(user=Depends(get_ready_user)):
     with connect() as conn:
         if user["role"] == "Teacher":
             alias = teacher_alias(user)
@@ -350,6 +386,10 @@ def bootstrap(user=Depends(get_current_user)):
         ]
         users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall()]
         meetings = [meeting_row(row) for row in conn.execute("SELECT * FROM meetings ORDER BY day, time").fetchall()]
+        if user["role"] == "Teacher":
+            users = [staff for staff in users if staff["id"] == user["id"]]
+            application_ids = {application["id"] for application in applications}
+            meetings = [meeting for meeting in meetings if meeting["applicantId"] in application_ids]
         student_ids = {student["id"] for student in students}
         attendance_records = [
             attendance_row(row)
@@ -394,6 +434,8 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
         "terminationNote": "termination_note",
     }
     updates = patch.model_dump(exclude_unset=True)
+    if user["role"] == "Teacher" and set(updates) - {"attendance", "stars", "hw", "nextHw"}:
+        raise HTTPException(status_code=403, detail="Teachers can only update learning records")
     if not updates:
         raise HTTPException(status_code=400, detail="No updates supplied")
     with connect() as conn:
@@ -547,20 +589,27 @@ def update_application_status(application_id: str, payload: StatusPatch, user=De
 def create_user(payload: StaffUserCreate, user=Depends(require_roles("IT Admin", "Registration"))):
     if user["role"] == "Registration" and payload.role != "Teacher":
         raise HTTPException(status_code=403, detail="Registration can only create teacher accounts")
+    if payload.role not in {"IT Admin", "Finance", "Teacher", "Registration"}:
+        raise HTTPException(status_code=422, detail="Invalid staff role")
     user_id = f"u-{uuid4().hex[:10]}"
+    payload.email = str(payload.email).strip().lower()
     with connect() as conn:
+        if conn.execute("SELECT id FROM staff_users WHERE lower(email) = ?", (payload.email,)).fetchone():
+            raise HTTPException(status_code=409, detail="An account with this email already exists")
         conn.execute(
             "INSERT INTO staff_users VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, payload.name, payload.role, payload.email, "active", "Just now"),
         )
-        password_hash, password_salt = hash_password("TempPass123!")
+        temporary_password = secrets.token_urlsafe(18)
+        password_hash, password_salt = hash_password(temporary_password)
         conn.execute(
-            "INSERT INTO auth_accounts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO auth_accounts (id, staff_user_id, email, password_hash, password_salt, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (f"auth-{user_id}", user_id, payload.email, password_hash, password_salt, payload.role, "active"),
         )
+        conn.execute("UPDATE auth_accounts SET must_change_password = 1 WHERE staff_user_id = ?", (user_id,))
         row = conn.execute("SELECT * FROM staff_users WHERE id = ?", (user_id,)).fetchone()
     audit("user.created", {"userId": user_id, "role": payload.role, "actorId": user["id"]})
-    return staff_row(row)
+    return {**staff_row(row), "temporaryPassword": temporary_password}
 
 
 @app.patch("/api/users/{user_id}/status")

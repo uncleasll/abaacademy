@@ -9,10 +9,12 @@ const demoAccounts = [
   { role: "Registration", email: "kamola@abaacademy.us", password: "Register123!" },
 ];
 
+const demoEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_ACCOUNTS === "true";
+
 export function LoginPage() {
   const { login } = useAcademy();
-  const [email, setEmail] = useState(demoAccounts[0].email);
-  const [password, setPassword] = useState(demoAccounts[0].password);
+  const [email, setEmail] = useState(demoEnabled ? demoAccounts[0].email : "");
+  const [password, setPassword] = useState(demoEnabled ? demoAccounts[0].password : "");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -106,7 +108,7 @@ export function LoginPage() {
             </form>
           </div>
 
-          <div className="mt-4 rounded-xl border border-line bg-white p-3 shadow-sm">
+          {demoEnabled && <div className="mt-4 rounded-xl border border-line bg-white p-3 shadow-sm">
             <p className="px-1 pb-2 text-xs font-bold uppercase tracking-[0.14em] text-ink/40">Demo accounts</p>
             <div className="grid gap-2">
               {demoAccounts.map((account) => (
@@ -125,7 +127,7 @@ export function LoginPage() {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
       </section>
     </main>

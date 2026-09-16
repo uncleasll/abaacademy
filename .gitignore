@@ -8,3 +8,5 @@ backend/*.db
 backend/*.db-*
 __pycache__/
 .pytest_cache/
+
+backend/private/

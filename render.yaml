@@ -1,0 +1,38 @@
+databases:
+  - name: abaacademy-db
+    plan: free
+    databaseName: abaacademy
+    user: abaacademy
+
+services:
+  - type: web
+    name: abaacademy-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: abaacademy-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_TTL_SECONDS
+        value: "43200"
+      - key: FRONTEND_URLS
+        value: https://abaacademy.vercel.app
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: STAFF_ACCOUNTS_JSON
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
