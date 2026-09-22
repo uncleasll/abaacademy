@@ -41,8 +41,8 @@ def provision(accounts: list[dict]) -> list[str]:
                              (user_id, name, role, email, 'active', 'Never'))
             conn.execute('''INSERT INTO auth_accounts
                 (id, staff_user_id, email, password_hash, password_salt, role, status, must_change_password)
-                VALUES (?, ?, ?, ?, ?, ?, 'active', 1)''',
-                ('auth-' + user_id, user_id, email, account['passwordHash'], account['passwordSalt'], role))
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?)''',
+                ('auth-' + user_id, user_id, email, account['passwordHash'], account['passwordSalt'], role, 0 if role == 'Teacher' else 1))
             created.append(email)
     return created
 
@@ -63,6 +63,8 @@ def enforce_staff_access() -> None:
         for email, (_, role) in STAFF_ACCOUNTS.items():
             conn.execute('UPDATE auth_accounts SET role = ?, token_version = token_version + 1 WHERE lower(email) = ? AND role != ?', (role, email, role))
             conn.execute('UPDATE staff_users SET role = ? WHERE lower(email) = ?', (role, email))
+            if role == 'Teacher':
+                conn.execute('UPDATE auth_accounts SET must_change_password=0 WHERE lower(email)=? AND must_change_password!=0', (email,))
 
 
 def provision_from_env() -> None:

@@ -88,9 +88,9 @@ class TeacherAuthTest(unittest.TestCase):
                 status, result = self.call('/api/auth/login', dict(email=email.upper(), password=self.password))
                 self.assertEqual(status, 200)
                 self.assertEqual(result['user']['role'], STAFF_ACCOUNTS[email][1])
-                self.assertTrue(result['user']['mustChangePassword'])
+                self.assertEqual(result['user']['mustChangePassword'], email not in TEACHERS)
                 token = result['token']
-                self.assertEqual(self.call('/api/bootstrap', token=token)[0], 403)
+                self.assertEqual(self.call('/api/bootstrap', token=token)[0], 200 if email in TEACHERS else 403)
                 self.assertEqual(self.call('/api/auth/change-password', dict(currentPassword='wrong', newPassword='Updated-teacher-password-123'), token)[0], 400)
                 self.assertEqual(self.call('/api/auth/change-password', dict(currentPassword=self.password, newPassword='short'), token)[0], 422)
                 self.assertEqual(self.call('/api/auth/change-password', dict(currentPassword=self.password, newPassword=self.password), token)[0], 400)

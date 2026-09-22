@@ -850,7 +850,7 @@ def reset_staff_password(user_id: str, payload: StaffPasswordReset, user=Depends
         target = conn.execute("SELECT email FROM staff_users WHERE id=?", (user_id,)).fetchone()
         if not target or target["email"].lower() not in STAFF_ACCOUNTS:
             raise HTTPException(404, "Approved staff account not found")
-        conn.execute("UPDATE auth_accounts SET password_hash=?, password_salt=?, must_change_password=1, token_version=token_version+1 WHERE staff_user_id=?", (digest, salt, user_id))
+        conn.execute("UPDATE auth_accounts SET password_hash=?, password_salt=?, must_change_password=?, token_version=token_version+1 WHERE staff_user_id=?", (digest, salt, 0 if STAFF_ACCOUNTS[target["email"].lower()][1] == "Teacher" else 1, user_id))
         finance.audit_in_transaction(conn, "user.password_reset", {"actorId": user["id"], "userId": user_id})
     return {"ok": True}
 

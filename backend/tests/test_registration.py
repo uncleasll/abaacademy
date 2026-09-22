@@ -54,15 +54,15 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(len(self.call('/api/bootstrap',token=tokens['firuz'])[1]['applications']),1)
         self.assertEqual(self.call('/api/applications/'+review['id']+'/status',{'status':'accepted'},tokens['firuz'],'PATCH')[0],200)
         self.assertEqual(len(self.call('/api/bootstrap',token=tokens['firuz'])[1]['students']),2)
-        # Admin reset revokes sessions and forces self-service password change.
+        # Teacher resets revoke sessions but allow immediate access and optional password change.
         reset='/api/users/'+staff['id']+'/reset-password'
         self.assertEqual(self.call(reset,{'temporaryPassword':'Temporary-password-123'},support)[0],403)
         self.assertEqual(self.call(reset,{'temporaryPassword':'short'},admin)[0],422)
         self.assertEqual(self.call(reset,{'temporaryPassword':'Temporary-password-123'},admin)[0],200)
         self.assertEqual(self.call('/api/auth/me',token=tokens['firuz'])[0],401)
         code,login=self.call('/api/auth/login',dict(email='firuz@abacademypa.com',password='Temporary-password-123'))
-        self.assertEqual(code,200);self.assertTrue(login['user']['mustChangePassword'])
-        self.assertEqual(self.call('/api/bootstrap',token=login['token'])[0],403)
+        self.assertEqual(code,200);self.assertFalse(login['user']['mustChangePassword'])
+        self.assertEqual(self.call('/api/bootstrap',token=login['token'])[0],200)
         code,changed=self.call('/api/auth/change-password',dict(currentPassword='Temporary-password-123',newPassword='Teacher-own-password-123'),login['token'])
         self.assertEqual(code,200);self.assertEqual(len(self.call('/api/bootstrap',token=changed['token'])[1]['students']),2)
         self.process.terminate();self.process.wait(timeout=10);self.start_server()
