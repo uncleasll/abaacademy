@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { Invoice, Payment, BillingPlan, PaymentInput, InvoiceInput } from "./financeTypes";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   type Application,
   type AssessmentRecord,
@@ -18,6 +19,9 @@ export interface Meeting {
 }
 
 interface BootstrapData {
+  invoices: Invoice[];
+  payments: Payment[];
+  billingPlans: BillingPlan[];
   students: Student[];
   applications: Application[];
   classGroups: ClassGroup[];
@@ -40,6 +44,10 @@ export interface AuthUser {
 }
 
 interface AcademyStore extends BootstrapData {
+  recordPayment: (payload: PaymentInput) => Promise<void>;
+  createInvoice: (payload: InvoiceInput) => Promise<void>;
+  saveBillingPlan: (payload: BillingPlan) => Promise<void>;
+  voidPayment: (id: string, reason: string) => Promise<void>;
   loading: boolean;
   authLoading: boolean;
   apiOnline: boolean;
@@ -73,6 +81,7 @@ const TOKEN_KEY = "aba_academy_token";
 const USER_KEY = "aba_academy_user";
 
 const fallbackData: BootstrapData = {
+  invoices: [], payments: [], billingPlans: [],
   students: [], applications: [], classGroups: [], staffUsers: [], meetings: [],
   attendanceDates: [], attendanceRecords: [], tuitionMonths: [], tuitionRecords: [], assessmentRecords: [],
 };
@@ -102,7 +111,7 @@ async function request<T>(path: string, init?: RequestInit, authToken?: string |
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(`${response.status} ${typeof body?.detail === "string" ? body.detail : response.statusText}`);
+    throw new Error(`${response.status} ${typeof body?.detail === "string" ? body.detail : Array.isArray(body?.detail) ? body.detail.map((item: { msg: string }) => item.msg).join("; ") : response.statusText}`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -130,6 +139,7 @@ async function downloadFile(path: string, fallbackName: string, authToken?: stri
 }
 
 export function AcademyProvider({ children }: { children: ReactNode }) {
+  const requestVersion = useRef(0);
   const [data, setData] = useState<BootstrapData>(fallbackData);
   const [loading, setLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
@@ -151,10 +161,11 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    const version = ++requestVersion.current;
     setLoading(true);
     try {
       const bootstrap = await request<Partial<BootstrapData>>("/api/bootstrap", undefined, activeToken);
-      setData({ ...fallbackData, ...bootstrap });
+      if (version === requestVersion.current) setData({ ...fallbackData, ...bootstrap });
       setApiOnline(true);
     } catch (error) {
       setData((prev) => prev);
@@ -179,6 +190,22 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       .catch(() => clearSession())
       .finally(() => setAuthLoading(false));
   }, [token]);
+
+  useEffect(() => {
+    if (!token || user?.mustChangePassword !== false) return;
+    let stopped = false;
+    const synchronize = async () => {
+      if (document.visibilityState !== "visible") return;
+      const version = ++requestVersion.current;
+      try {
+        const fresh = await request<BootstrapData>("/api/bootstrap", undefined, token);
+        if (!stopped && version === requestVersion.current) { setData({ ...fallbackData, ...fresh }); setApiOnline(true); }
+      } catch { if (!stopped) setApiOnline(false); }
+    };
+    const interval = window.setInterval(() => void synchronize(), 30000);
+    window.addEventListener("focus", synchronize);
+    return () => { stopped = true; window.clearInterval(interval); window.removeEventListener("focus", synchronize); };
+  }, [token, user?.mustChangePassword]);
 
   const store = useMemo<AcademyStore>(() => {
     const login: AcademyStore["login"] = async (email, password) => {
@@ -214,25 +241,35 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const updateStudent: AcademyStore["updateStudent"] = async (id, patch) => {
-      setData((prev) => ({
-        ...prev,
-        students: prev.students.map((student) => (student.id === id ? { ...student, ...patch } : student)),
-      }));
+    const financeMutation = async (path: string, payload: unknown, method = "POST", idempotent = false) => {
+      // Preserve the request ID through network failures, reloads, and retries.
+      const serialized = JSON.stringify(payload);
+      const key = `aba-finance-request:${user?.id}:${path}:${serialized}`;
+      const requestId = sessionStorage.getItem(key) || crypto.randomUUID();
+      if (idempotent) sessionStorage.setItem(key, requestId);
+      ++requestVersion.current;
       try {
-        const updated = await request<Student>(`/api/students/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        });
+        await request(path, { method, body: JSON.stringify(idempotent ? { ...(payload as object), requestId } : payload) });
+        const version = ++requestVersion.current;
+        const fresh = await request<BootstrapData>("/api/bootstrap");
+        if (version === requestVersion.current) setData({ ...fallbackData, ...fresh });
         setApiOnline(true);
-        setData((prev) => ({
-          ...prev,
-          students: prev.students.map((student) => (student.id === id ? updated : student)),
-        }));
-        return updated;
-      } catch {
+        if (idempotent) sessionStorage.removeItem(key);
+      } catch (error) {
         setApiOnline(false);
+        throw error;
       }
+    };
+    const recordPayment: AcademyStore["recordPayment"] = payload => financeMutation("/api/finance/payments", payload, "POST", true);
+    const createInvoice: AcademyStore["createInvoice"] = payload => financeMutation("/api/finance/invoices", payload, "POST", true);
+    const saveBillingPlan: AcademyStore["saveBillingPlan"] = payload => financeMutation("/api/finance/billing-plan", payload, "PUT");
+    const voidPayment: AcademyStore["voidPayment"] = (id, reason) => financeMutation(`/api/finance/payments/${id}/void`, { reason });
+
+    const updateStudent: AcademyStore["updateStudent"] = async (id, patch) => {
+      const updated = await request<Student>(`/api/students/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setData(prev => ({ ...prev, students: prev.students.map(student => student.id === id ? updated : student) }));
+      setApiOnline(true);
+      return updated;
     };
 
     const updateAttendanceRecord: AcademyStore["updateAttendanceRecord"] = async (studentId, date, present) => {
@@ -253,32 +290,18 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
           ),
         };
       };
-      setData((prev) => ({
-        ...recalculateStudentAttendance(prev),
-      }));
       try {
         await request("/api/attendance", { method: "PUT", body: JSON.stringify({ studentId, date, present }) });
         setApiOnline(true);
-        await refresh();
-      } catch {
+        setData(prev => recalculateStudentAttendance(prev));
+      } catch (error) {
         setApiOnline(false);
+        throw error;
       }
     };
 
-    const updateTuitionRecord: AcademyStore["updateTuitionRecord"] = async (studentId, month, status, amount) => {
-      setData((prev) => ({
-        ...prev,
-        tuitionRecords: [
-          ...prev.tuitionRecords.filter((record) => record.studentId !== studentId || record.month !== month),
-          { studentId, month, status, amount },
-        ],
-      }));
-      try {
-        await request("/api/tuition-records", { method: "PUT", body: JSON.stringify({ studentId, month, status, amount }) });
-        setApiOnline(true);
-      } catch {
-        setApiOnline(false);
-      }
+    const updateTuitionRecord: AcademyStore["updateTuitionRecord"] = async () => {
+      throw new Error("Use Tuition & Payments. Monthly totals are automatic.");
     };
 
     const updateAssessmentRecord: AcademyStore["updateAssessmentRecord"] = async (record) => {
@@ -297,51 +320,20 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const createApplication: AcademyStore["createApplication"] = async (payload) => {
-      const optimistic: Application = {
-        ...payload,
-        id: `a-${Date.now()}`,
-        submitted: new Date().toISOString().slice(0, 10),
-        status: "pending",
-      };
-      setData((prev) => ({ ...prev, applications: [optimistic, ...prev.applications] }));
-      try {
-        const created = await request<Application>("/api/applications", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setApiOnline(true);
-        setData((prev) => ({
-          ...prev,
-          applications: prev.applications.map((app) => (app.id === optimistic.id ? created : app)),
-        }));
-        return created;
-      } catch {
-        setApiOnline(false);
-        return optimistic;
-      }
+    const createApplication: AcademyStore["createApplication"] = async payload => {
+      const created = await request<Application>("/api/applications", { method: "POST", body: JSON.stringify(payload) });
+      setData(prev => ({ ...prev, applications: [created, ...prev.applications] }));
+      setApiOnline(true);
+      return created;
     };
 
     const updateApplicationStatus: AcademyStore["updateApplicationStatus"] = async (id, status) => {
-      setData((prev) => ({
-        ...prev,
-        applications: prev.applications.map((app) => (app.id === id ? { ...app, status } : app)),
-      }));
-      try {
-        const updated = await request<Application>(`/api/applications/${id}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        });
-        setApiOnline(true);
-        setData((prev) => ({
-          ...prev,
-          applications: prev.applications.map((app) => (app.id === id ? updated : app)),
-        }));
-        if (status === "accepted") await refresh();
-        return updated;
-      } catch {
-        setApiOnline(false);
-      }
+      const updated = await request<Application>(`/api/applications/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
+      const fresh = await request<BootstrapData>("/api/bootstrap");
+      ++requestVersion.current;
+      setData({ ...fallbackData, ...fresh });
+      setApiOnline(true);
+      return updated;
     };
 
     const createUser: AcademyStore["createUser"] = async (payload) => {
@@ -462,6 +454,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
 
     return {
       ...data,
+      recordPayment, createInvoice, saveBillingPlan, voidPayment,
       loading,
       authLoading,
       apiOnline,

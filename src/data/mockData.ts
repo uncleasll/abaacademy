@@ -27,6 +27,7 @@ export interface Student {
   rank: number;
   tuitionStatus: PaymentStatus;
   amountDue: number;
+  billingConfigured?: boolean;
   joinedDate?: string;
   enrollmentStatus?: EnrollmentStatus;
   financeNote?: string;
@@ -41,6 +42,9 @@ export interface AttendanceRecord {
 }
 
 export interface TuitionRecord {
+  legacy?: boolean;
+  balance?: number;
+  dueDate?: string;
   studentId: string;
   month: string;
   status: MonthlyPaymentStatus;

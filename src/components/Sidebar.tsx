@@ -24,6 +24,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { key: "overview", label: "Overview", icon: LayoutGrid },
     { key: "users", label: "Users & Roles", icon: UserCog },
     { key: "students", label: "Students", icon: Users },
+    { key: "tuition", label: "Tuition & Payments", icon: Wallet },
   ],
   Finance: [
     { key: "overview", label: "Overview", icon: LayoutGrid },

@@ -179,6 +179,10 @@ def init_db() -> None:
             if "duplicate column name" not in str(exc):
                 raise
 
+    from .finance import init_finance
+    with connect() as conn:
+        init_finance(conn)
+
 
 def audit(event: str, payload: dict[str, Any] | None = None) -> None:
     with connect() as conn:

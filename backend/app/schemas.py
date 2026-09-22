@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field
+from datetime import date
+from decimal import Decimal
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class Student(BaseModel):
@@ -170,3 +175,55 @@ class AssessmentRecordPatch(BaseModel):
     memorization: int = Field(ge=0, le=100)
     practical: int = Field(ge=0, le=100)
     note: str = ""
+
+
+class PaymentCreate(BaseModel):
+    requestId: UUID
+    studentId: str
+    invoiceId: str
+    amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
+    method: Literal['cash', 'bank_transfer', 'check', 'card_external']
+    paidOn: date
+    reference: str = Field(default='', max_length=200)
+    note: str = Field(default='', max_length=1000)
+
+    @model_validator(mode='after')
+    def validate_date(self):
+        if self.paidOn > date.today():
+            raise ValueError('Payment date cannot be in the future')
+        return self
+
+
+class InvoiceCreate(BaseModel):
+    requestId: UUID
+    studentId: str
+    period: str = Field(pattern=r'^20\d{2}-(0[1-9]|1[0-2])$')
+    amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
+    dueDate: date
+
+
+class BillingPlanUpdate(BaseModel):
+    studentId: str
+    amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
+    startMonth: str = Field(pattern=r'^20\d{2}-(0[1-9]|1[0-2])$')
+    endMonth: str = Field(pattern=r'^20\d{2}-(0[1-9]|1[0-2])$')
+    dueDay: int = Field(ge=1, le=28)
+    active: bool = True
+
+    @model_validator(mode='after')
+    def validate_months(self):
+        span = (int(self.endMonth[:4]) - int(self.startMonth[:4])) * 12 + int(self.endMonth[5:]) - int(self.startMonth[5:])
+        if span < 0 or span >= 24:
+            raise ValueError('Choose an ordered billing period of at most two years')
+        return self
+
+
+class PaymentVoid(BaseModel):
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @model_validator(mode='after')
+    def meaningful_reason(self):
+        self.reason = self.reason.strip()
+        if len(self.reason) < 5:
+            raise ValueError('Enter a reason of at least five characters')
+        return self

@@ -106,8 +106,8 @@ export function TeacherRoster() {
   const [notice, setNotice] = useState("Select a group and start today's class session.");
 
   useEffect(() => {
-    setRows(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
-  }, [teacherStudents]);
+    if (saved) setRows(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
+  }, [teacherStudents, saved]);
 
   useEffect(() => {
     if (groupFilter !== "All groups" || !teacherGroups[0]) return;
@@ -173,23 +173,17 @@ Demo bot preview only.`;
     setNotice(`${visibleRows.length} students marked ${attendance}.`);
   };
 
-  const saveChanges = () => {
-    setRows((prev) => prev.map((row) => ({ ...row, nextHw: row.nextHwDraft })));
-    visibleRows.forEach((row) => {
-      void updateStudent(row.id, {
-        attendance: row.attendance,
-        stars: row.stars,
-        hw: row.hw,
-        nextHw: row.nextHwDraft,
-        enrollmentStatus: row.enrollmentStatus,
-        financeNote: row.financeNote,
-        terminationNote: row.terminationNote,
-      });
-      void updateAttendanceRecord(row.id, sessionDate, row.attendance !== "absent");
-    });
-    setSaved(true);
-    setSessionState("saved");
-    setNotice(`${visibleRows.length} student records saved for ${sessionDate}.`);
+  const saveChanges = async () => {
+    try {
+      for (const row of visibleRows) {
+        await updateStudent(row.id, { attendance: row.attendance, stars: row.stars, hw: row.hw, nextHw: row.nextHwDraft });
+        await updateAttendanceRecord(row.id, sessionDate, row.attendance !== "absent");
+      }
+      setSaved(true); setSessionState("saved");
+      setNotice(`${visibleRows.length} student records saved for ${sessionDate}.`);
+    } catch (error) {
+      setNotice(`Class save incomplete: ${error instanceof Error ? error.message : "connection error"}. Your draft is kept; retry to finish.`);
+    }
   };
 
   const startSession = () => {
@@ -403,8 +397,7 @@ Demo bot preview only.`;
                       <button
                         type="button"
                         onClick={() => {
-                          void updateApplicationStatus(app.id, "accepted");
-                          setNotice(`${app.name} accepted for ${app.klass}.`);
+                          void updateApplicationStatus(app.id, "accepted").then(() => setNotice(`${app.name} accepted for ${app.klass}.`)).catch(error => setNotice(`Could not confirm acceptance: ${error.message}`));
                         }}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
                       >
@@ -413,8 +406,7 @@ Demo bot preview only.`;
                       <button
                         type="button"
                         onClick={() => {
-                          void updateApplicationStatus(app.id, "rejected");
-                          setNotice(`${app.name} declined by teacher.`);
+                          void updateApplicationStatus(app.id, "rejected").then(() => setNotice(`${app.name} declined by teacher.`)).catch(error => setNotice(`Could not confirm decision: ${error.message}`));
                         }}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-200 hover:bg-red-50"
                       >
@@ -584,34 +576,9 @@ Demo bot preview only.`;
                   <div className="rounded-lg border border-line bg-cream/45 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-semibold uppercase text-ink/40">Enrollment / finance</p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          update(student.id, {
-                            enrollmentStatus: student.enrollmentStatus === "terminated" ? "active" : "terminated",
-                            terminationNote:
-                              student.enrollmentStatus === "terminated"
-                                ? ""
-                                : student.terminationNote || "Teacher marked terminated. Finance review needed.",
-                            financeNote:
-                              student.enrollmentStatus === "terminated" ? "" : "Student terminated by teacher. Stop/verify billing.",
-                          })
-                        }
-                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${
-                          student.enrollmentStatus === "terminated"
-                            ? "bg-red-600 text-white"
-                            : "border border-line bg-white text-ink/55 hover:border-red-200 hover:text-red-600"
-                        }`}
-                      >
-                        <UserX size={14} /> {student.enrollmentStatus === "terminated" ? "Terminated" : "Terminate"}
-                      </button>
+                      <span className="text-xs font-semibold">{student.enrollmentStatus ?? "active"}</span>
                     </div>
-                    <input
-                      value={student.terminationNote ?? student.financeNote ?? ""}
-                      onChange={(event) => update(student.id, { terminationNote: event.target.value, financeNote: event.target.value })}
-                      placeholder="Optional note visible to finance"
-                      className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-gold-500"
-                    />
+                    <p className="mt-2 text-xs text-ink/60">{student.terminationNote || student.financeNote || "Enrollment and billing are managed by administration / finance."}</p>
                   </div>
                 </div>
               )}

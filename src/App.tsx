@@ -30,6 +30,7 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
     if (tab === "overview") return <AdminOverview />;
     if (tab === "users") return <UsersPage />;
     if (tab === "students") return <StudentsPage />;
+    if (tab === "tuition") return <TuitionPage />;
   }
   if (role === "Finance") {
     if (tab === "overview") return <FinanceOverview />;

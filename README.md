@@ -101,3 +101,15 @@ all eight accounts, forced password changes, role permissions, rejected legacy a
 and sessions, preservation of business data, no additional/deleted accounts, and
 password/session behavior across restarts and activation changes. PostgreSQL and live
 hosting require a separate deployment smoke test.
+
+## Automatic tuition and family records
+
+IT Admin and Finance can open **Tuition & Payments**, select a student, and record money already received. Parent name/phone come from enrollment automatically. Payments are stored in integer USD cents; partial payments, outstanding balances, overdue status, monthly reports and downloadable receipts all derive from the same ledger. The form does not process cards or send messages to parents. Staff access remains limited to the eight approved accounts.
+
+Set a student's monthly amount, first/last billing month and due day once to enable a schedule. When staff open/refresh the app, missing invoices through the current month are created exactly once, within the chosen period. The app refreshes every 30 seconds while visible and when refocused. July/August or other holidays are not assumed: configure the actual billing period. There is no background card charging. A past start month explicitly creates missing historical invoices; when restarting a paused schedule, choose the intended new start month. Paused/terminated students receive no new scheduled invoices. Existing invoices are never silently repriced by a schedule change. One-off monthly invoices are also supported.
+
+A payment and its audit event commit together. Repeated submissions reuse a request ID; concurrent payments lock the student's ledger and cannot overpay an invoice. A mistaken payment can be voided with a reason, preserving its receipt and restoring the balance. Voiding is a bookkeeping correction, not a bank/card refund. Receipt exports contain the actual amount, date, method, reference and parent snapshot.
+
+Migration preserves the previously displayed outstanding student debt once as an **Opening balance** invoice. Historical manually edited monthly status cells remain read-only and are excluded from new receipt/collection totals; they are not reliable transaction evidence. No guessed tuition rate or fake payment is inserted. New enrollment starts without bills until Finance configures tuition, and no longer fabricates historical attendance. Applications accepted repeatedly do not create duplicate enrollment; active group counts derive from enrolled students.
+
+Verification: `backend/.venv/bin/python -m unittest discover -s backend/tests -v`, `npm run build`, `npm run lint`. Finance integration tests use only a temporary local database and cover payment retries/concurrency, partial and full settlement, permissions, rollback on audit failure, voids, exports, yearly period separation, automatic billing, enrollment and persistence after restart.

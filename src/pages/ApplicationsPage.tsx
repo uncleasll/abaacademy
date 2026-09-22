@@ -243,27 +243,21 @@ export function ApplicationsPage() {
     setGroupFilter("All groups");
   };
 
+  const changeStatus = async (app: Application, status: AppStatus) => {
+    try { await updateApplicationStatus(app.id, status); setNotice(`${app.name}: ${status.replace("_", " ")}. Student and group records updated.`); }
+    catch (error) { setNotice(`Could not confirm the update: ${error instanceof Error ? error.message : "connection error"}. Refresh before retrying.`); }
+  };
   const advance = (app: Application) => {
-    const effectiveStatus = pipelineStatus(app.status);
-    if (nextStatus[effectiveStatus]) void updateApplicationStatus(app.id, nextStatus[effectiveStatus]!);
-    setNotice(`${app.name}: ${actionLabel[effectiveStatus] ?? "Moved forward"}.`);
+    const status = nextStatus[pipelineStatus(app.status)];
+    if (status) void changeStatus(app, status);
   };
-
-  const reject = (app: Application) => {
-    void updateApplicationStatus(app.id, "rejected");
-    setNotice(`${app.name} marked as rejected.`);
-  };
-  const waitlist = (app: Application) => {
-    void updateApplicationStatus(app.id, "waitlist");
-    setNotice(`${app.name} moved to waitlist.`);
-  };
-  const moveFromWaitlist = (app: Application, status: AppStatus) => {
-    void updateApplicationStatus(app.id, status);
-    setNotice(`${app.name} moved from waitlist to ${status.replace("_", " ")}.`);
-  };
+  const reject = (app: Application) => { void changeStatus(app, "rejected"); };
+  const waitlist = (app: Application) => { void changeStatus(app, "waitlist"); };
+  const moveFromWaitlist = (app: Application, status: AppStatus) => { void changeStatus(app, status); };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    try {
     const newApp = await createApplication({
       name: form.name.trim(),
       age: Number(form.age),
@@ -285,6 +279,7 @@ export function ApplicationsPage() {
     });
     setNotice(`${newApp.name} registered and assigned to ${newApp.klass}.`);
     setForm(emptyForm);
+    } catch (error) { setNotice(`Registration was not confirmed: ${error instanceof Error ? error.message : "connection error"}. Refresh before retrying.`); }
   };
 
   return (
