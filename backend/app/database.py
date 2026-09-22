@@ -41,7 +41,7 @@ def connect() -> Iterator[DatabaseConnection]:
         import psycopg
         from psycopg.rows import dict_row
 
-        raw = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        raw = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=10, prepare_threshold=None)
         conn = DatabaseConnection(raw, postgres=True)
     else:
         DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +160,14 @@ def init_db() -> None:
             if statement:
                 conn.execute(statement)
         conn.execute(POSTGRES_AUDIT_SCHEMA if conn.postgres else SQLITE_AUDIT_SCHEMA)
+        if conn.postgres:
+            # Supabase's public API must not expose staff hashes or academy records.
+            # The backend connects as the table owner and remains able to access them.
+            for table in (
+                "students", "applications", "class_groups", "staff_users", "auth_accounts",
+                "meetings", "attendance_records", "tuition_records", "assessment_records", "audit_log",
+            ):
+                conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
 
     # Separate transactions prevent an old-schema migration failure from aborting the full startup.
     for migration in MIGRATIONS:

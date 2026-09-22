@@ -1,9 +1,3 @@
-databases:
-  - name: abaacademy-db
-    plan: free
-    databaseName: abaacademy
-    user: abaacademy
-
 services:
   - type: web
     name: abaacademy
@@ -17,9 +11,7 @@ services:
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: abaacademy-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_TTL_SECONDS

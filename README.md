@@ -1,6 +1,6 @@
 # ABA Academy USA Operations
 
-React/TypeScript frontend on Vercel; FastAPI backend on Render; PostgreSQL for production.
+React/TypeScript frontend on Vercel; FastAPI backend on Render; existing Supabase PostgreSQL for production.
 
 ## Approved staff access
 
@@ -67,10 +67,12 @@ Configure the existing Render service with:
 - `FRONTEND_URLS=https://abaacademy.vercel.app` (plus any approved custom frontend origins).
 - `STAFF_ACCOUNTS_JSON`: the full contents of `backend/private/teachers-bootstrap.json`.
 
-`render.yaml` describes the backend and PostgreSQL. Applying a Blueprint to an existing
-service requires checking its current database and service settings first. Back up and
+`render.yaml` describes the backend using the existing Supabase database through
+`DATABASE_URL`; it does not create an additional paid database. Applying a Blueprint
+to an existing service requires checking its current settings first. Back up and
 preserve existing business data before any database migration. Production must not rely
-on an ephemeral SQLite file. Remove `STAFF_ACCOUNTS_JSON` after successful provisioning
+on an ephemeral SQLite file. Academy tables use row-level security to block direct
+Supabase public-API access; the backend connects as the database table owner. Remove `STAFF_ACCOUNTS_JSON` after successful provisioning
 if desired; all eight accounts must remain in the persistent database.
 
 The backend fails startup with a specific error if any of the eight accounts is missing;
