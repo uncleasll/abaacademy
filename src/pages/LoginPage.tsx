@@ -2,19 +2,10 @@ import { LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useAcademy } from "../data/academyStore";
 
-const demoAccounts = [
-  { role: "IT Admin", email: "shavkat@abaacademy.us", password: "Admin123!" },
-  { role: "Finance", email: "malika@abaacademy.us", password: "Finance123!" },
-  { role: "Teacher", email: "behzodjon@abaacademy.us", password: "Teacher123!" },
-  { role: "Registration", email: "kamola@abaacademy.us", password: "Register123!" },
-];
-
-const demoEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_ACCOUNTS === "true";
-
 export function LoginPage() {
   const { login } = useAcademy();
-  const [email, setEmail] = useState(demoEnabled ? demoAccounts[0].email : "");
-  const [password, setPassword] = useState(demoEnabled ? demoAccounts[0].password : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -24,8 +15,11 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email.trim(), password);
-    } catch {
-      setError("Email or password is incorrect.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setError(message.startsWith("401") ? "Email or password is incorrect." :
+        message.startsWith("403") ? "This account is inactive. Please contact your administrator." :
+        "The server is unavailable. Please try again shortly.");
     } finally {
       setSubmitting(false);
     }
@@ -108,26 +102,7 @@ export function LoginPage() {
             </form>
           </div>
 
-          {demoEnabled && <div className="mt-4 rounded-xl border border-line bg-white p-3 shadow-sm">
-            <p className="px-1 pb-2 text-xs font-bold uppercase tracking-[0.14em] text-ink/40">Demo accounts</p>
-            <div className="grid gap-2">
-              {demoAccounts.map((account) => (
-                <button
-                  key={account.email}
-                  type="button"
-                  onClick={() => {
-                    setEmail(account.email);
-                    setPassword(account.password);
-                    setError("");
-                  }}
-                  className="flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition hover:bg-cream"
-                >
-                  <span className="font-semibold text-ink">{account.role}</span>
-                  <span className="truncate pl-3 text-xs text-ink/45">{account.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>}
+
         </div>
       </section>
     </main>

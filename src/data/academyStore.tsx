@@ -355,26 +355,12 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     };
 
     const updateUserStatus: AcademyStore["updateUserStatus"] = async (id, status) => {
-      setData((prev) => ({
-        ...prev,
-        staffUsers: prev.staffUsers.map((user) =>
-          user.id === id ? { ...user, status, lastActive: "Updated just now" } : user
-        ),
-      }));
-      try {
-        const updated = await request<StaffUser>(`/api/users/${id}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        });
-        setApiOnline(true);
-        setData((prev) => ({
-          ...prev,
-          staffUsers: prev.staffUsers.map((user) => (user.id === id ? updated : user)),
-        }));
-        return updated;
-      } catch {
-        setApiOnline(false);
-      }
+      const updated = await request<StaffUser>(`/api/users/${id}/status`, {
+        method: "PATCH", body: JSON.stringify({ status }),
+      });
+      setApiOnline(true);
+      setData(prev => ({ ...prev, staffUsers: prev.staffUsers.map(user => user.id === id ? updated : user) }));
+      return updated;
     };
 
     const deleteUser: AcademyStore["deleteUser"] = async (id) => {

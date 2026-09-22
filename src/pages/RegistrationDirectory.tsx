@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { GraduationCap, Plus, Search, Trash2, Users } from "lucide-react";
+import { useMemo, useState } from "react";
+import { GraduationCap, Search, Users } from "lucide-react";
 import { SectionTitle, PaymentPill, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
 
@@ -21,14 +21,12 @@ function formatDate(value?: string) {
 }
 
 export function RegistrationDirectory() {
-  const { students, staffUsers, classGroups, createUser, deleteUser } = useAcademy();
-  const [teacherName, setTeacherName] = useState("");
-  const [teacherEmail, setTeacherEmail] = useState("");
+  const { students, staffUsers, classGroups } = useAcademy();
   const [query, setQuery] = useState("");
   const [teacherFilter, setTeacherFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
-  const [notice, setNotice] = useState("Registration can add or remove teacher accounts from this page.");
+  const notice = "Teacher access is limited to the five approved academy teachers.";
 
   const teachers = useMemo(
     () => staffUsers.filter((user) => user.role === "Teacher").sort((a, b) => a.name.localeCompare(b.name)),
@@ -72,24 +70,6 @@ export function RegistrationDirectory() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [groupFilter, query, riskFilter, students, teacherFilter]);
 
-  const submitTeacher = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = teacherName.trim();
-    const email = teacherEmail.trim();
-    if (!name || !email) return;
-    try {
-    const created = await createUser({ name, email, role: "Teacher" });
-    setTeacherName("");
-    setTeacherEmail("");
-    setNotice(`Account: ${created.email} — Temporary password: ${created.temporaryPassword}. Save it now and share privately; change required at first login.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not create teacher."); }
-  };
-
-  const removeTeacher = (id: string, name: string) => {
-    void deleteUser(id);
-    setNotice(`${name} removed from teacher access.`);
-  };
-
   const riskCount = students.filter(
     (student) => student.attendancePct < 85 || student.tuitionStatus !== "paid" || student.status === "Needs Attention"
   ).length;
@@ -129,29 +109,8 @@ export function RegistrationDirectory() {
               <Users size={18} className="text-green-800" />
               <h3 className="text-lg font-semibold text-ink">Teacher roster</h3>
             </div>
-            <p className="mt-1 text-sm text-ink/50">Add teacher login access or remove unused teacher accounts.</p>
+            <p className="mt-1 text-sm text-ink/50">Approved teacher accounts and their assigned students.</p>
           </div>
-
-          <form onSubmit={submitTeacher} className="grid gap-3 border-b border-line p-4">
-            <input
-              required
-              value={teacherName}
-              onChange={(event) => setTeacherName(event.target.value)}
-              placeholder="Teacher full name"
-              className="rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-            />
-            <input
-              required
-              type="email"
-              value={teacherEmail}
-              onChange={(event) => setTeacherEmail(event.target.value)}
-              placeholder="teacher@abaacademy.us"
-              className="rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500"
-            />
-            <button className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800">
-              <Plus size={16} /> Add teacher
-            </button>
-          </form>
 
           <div className="max-h-[540px] divide-y divide-line overflow-y-auto">
             {teachers.map((teacher) => {
@@ -163,15 +122,6 @@ export function RegistrationDirectory() {
                     <p className="truncate text-xs text-ink/45">{teacher.email}</p>
                     <p className="mt-1 text-xs font-semibold text-ink/50">{assigned} assigned students</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeTeacher(teacher.id, teacher.name)}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
-                    aria-label={`Remove ${teacher.name}`}
-                    title={`Remove ${teacher.name}`}
-                  >
-                    <Trash2 size={16} />
-                  </button>
                 </div>
               );
             })}

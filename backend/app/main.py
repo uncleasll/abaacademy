@@ -4,7 +4,6 @@ from datetime import date
 import csv
 import io
 import os
-import secrets
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -24,8 +23,7 @@ from .schemas import (
     StudentPatch,
     TuitionRecordPatch,
 )
-from .seed import seed_if_empty
-from .provision_teachers import provision_from_env
+from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
@@ -57,8 +55,8 @@ app.add_middleware(
 def startup() -> None:
     validate_security_config()
     init_db()
-    seed_if_empty()
     provision_from_env()
+    enforce_staff_access()
 
 
 def student_row(row):
@@ -257,7 +255,7 @@ def enroll_accepted_application(conn, application) -> None:
 def health():
     with connect() as conn:
         conn.execute("SELECT 1").fetchone()
-    return {"status": "ok", "database": "connected"}
+    return {"status": "ok", "database": "connected", "revision": os.getenv("RENDER_GIT_COMMIT", "local")}
 
 
 def get_current_user(authorization: str | None = Header(default=None)):
@@ -279,7 +277,7 @@ def get_current_user(authorization: str | None = Header(default=None)):
             """,
             (payload.get("sub"), payload.get("email")),
         ).fetchone()
-    if not row or row["status"] != "active":
+    if not row or row["status"] != "active" or row["email"].lower() not in STAFF_ACCOUNTS:
         raise HTTPException(status_code=401, detail="Account is inactive")
     if payload.get("version", 0) != row["token_version"]:
         raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
@@ -302,11 +300,13 @@ def require_roles(*roles: str):
 
 
 def teacher_alias(user: dict) -> str:
-    return user["name"].split(" ")[0]
+    return STAFF_ACCOUNTS[user["email"].lower()][0]
 
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest):
+    if str(payload.email).lower() not in STAFF_ACCOUNTS:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     with connect() as conn:
         row = conn.execute(
             """
@@ -384,7 +384,7 @@ def bootstrap(user=Depends(get_ready_user)):
             app
             for app in applications
         ]
-        users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall()]
+        users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall() if row["email"].lower() in STAFF_ACCOUNTS]
         meetings = [meeting_row(row) for row in conn.execute("SELECT * FROM meetings ORDER BY day, time").fetchall()]
         if user["role"] == "Teacher":
             users = [staff for staff in users if staff["id"] == user["id"]]
@@ -587,42 +587,26 @@ def update_application_status(application_id: str, payload: StatusPatch, user=De
 
 @app.post("/api/users", status_code=201)
 def create_user(payload: StaffUserCreate, user=Depends(require_roles("IT Admin", "Registration"))):
-    if user["role"] == "Registration" and payload.role != "Teacher":
-        raise HTTPException(status_code=403, detail="Registration can only create teacher accounts")
-    if payload.role not in {"IT Admin", "Finance", "Teacher", "Registration"}:
-        raise HTTPException(status_code=422, detail="Invalid staff role")
-    user_id = f"u-{uuid4().hex[:10]}"
-    payload.email = str(payload.email).strip().lower()
-    with connect() as conn:
-        if conn.execute("SELECT id FROM staff_users WHERE lower(email) = ?", (payload.email,)).fetchone():
-            raise HTTPException(status_code=409, detail="An account with this email already exists")
-        conn.execute(
-            "INSERT INTO staff_users VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, payload.name, payload.role, payload.email, "active", "Just now"),
-        )
-        temporary_password = secrets.token_urlsafe(18)
-        password_hash, password_salt = hash_password(temporary_password)
-        conn.execute(
-            "INSERT INTO auth_accounts (id, staff_user_id, email, password_hash, password_salt, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (f"auth-{user_id}", user_id, payload.email, password_hash, password_salt, payload.role, "active"),
-        )
-        conn.execute("UPDATE auth_accounts SET must_change_password = 1 WHERE staff_user_id = ?", (user_id,))
-        row = conn.execute("SELECT * FROM staff_users WHERE id = ?", (user_id,)).fetchone()
-    audit("user.created", {"userId": user_id, "role": payload.role, "actorId": user["id"]})
-    return {**staff_row(row), "temporaryPassword": temporary_password}
+    raise HTTPException(status_code=403, detail="Access is limited to the eight configured academy accounts")
 
 
 @app.patch("/api/users/{user_id}/status")
 def update_user_status(user_id: str, payload: StatusPatch, user=Depends(require_roles("IT Admin"))):
+    if payload.status not in {"active", "inactive"}:
+        raise HTTPException(status_code=422, detail="Invalid account status")
+    if user_id == user["id"] and payload.status != "active":
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own administrator account")
     with connect() as conn:
-        exists = conn.execute("SELECT id FROM staff_users WHERE id = ?", (user_id,)).fetchone()
+        exists = conn.execute("SELECT id, email FROM staff_users WHERE id = ?", (user_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="User not found")
+        if exists["email"].lower() not in STAFF_ACCOUNTS:
+            raise HTTPException(status_code=403, detail="This account is not authorized for academy access")
         conn.execute(
             "UPDATE staff_users SET status = ?, last_active = ? WHERE id = ?",
             (payload.status, "Updated just now", user_id),
         )
-        conn.execute("UPDATE auth_accounts SET status = ? WHERE staff_user_id = ?", (payload.status, user_id))
+        conn.execute("UPDATE auth_accounts SET status = ?, token_version = token_version + 1 WHERE staff_user_id = ?", (payload.status, user_id))
         row = conn.execute("SELECT * FROM staff_users WHERE id = ?", (user_id,)).fetchone()
     audit("user.status_updated", {"userId": user_id, "status": payload.status, "actorId": user["id"]})
     return staff_row(row)
@@ -630,17 +614,7 @@ def update_user_status(user_id: str, payload: StatusPatch, user=Depends(require_
 
 @app.delete("/api/users/{user_id}", status_code=204)
 def delete_user(user_id: str, user=Depends(require_roles("IT Admin", "Registration"))):
-    if user_id == user["id"]:
-        raise HTTPException(status_code=400, detail="Admins cannot delete their own active session")
-    with connect() as conn:
-        exists = conn.execute("SELECT id, role FROM staff_users WHERE id = ?", (user_id,)).fetchone()
-        if not exists:
-            raise HTTPException(status_code=404, detail="User not found")
-        if user["role"] == "Registration" and exists["role"] != "Teacher":
-            raise HTTPException(status_code=403, detail="Registration can only delete teacher accounts")
-        conn.execute("DELETE FROM staff_users WHERE id = ?", (user_id,))
-    audit("user.deleted", {"userId": user_id, "actorId": user["id"]})
-    return None
+    raise HTTPException(status_code=403, detail="The configured academy accounts cannot be deleted")
 
 
 @app.post("/api/meetings", status_code=201)

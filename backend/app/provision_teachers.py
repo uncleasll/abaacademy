@@ -47,6 +47,24 @@ def provision(accounts: list[dict]) -> list[str]:
     return created
 
 
+def enforce_staff_access() -> None:
+    """Keep only the eight authorized staff accounts, without deleting business data."""
+    with connect() as conn:
+        existing = {row['email'].lower() for row in conn.execute('SELECT email FROM auth_accounts').fetchall()}
+        missing = set(STAFF_ACCOUNTS) - existing
+        if missing:
+            raise RuntimeError('Missing staff accounts. Configure STAFF_ACCOUNTS_JSON before deployment: ' + ', '.join(sorted(missing)))
+        placeholders = ', '.join('?' for _ in STAFF_ACCOUNTS)
+        emails = tuple(STAFF_ACCOUNTS)
+        conn.execute(
+            f"UPDATE auth_accounts SET status = 'inactive', token_version = token_version + 1 WHERE lower(email) NOT IN ({placeholders}) AND status != 'inactive'", emails,
+        )
+        conn.execute(f"UPDATE staff_users SET status = 'inactive' WHERE lower(email) NOT IN ({placeholders})", emails)
+        for email, (_, role) in STAFF_ACCOUNTS.items():
+            conn.execute('UPDATE auth_accounts SET role = ?, token_version = token_version + 1 WHERE lower(email) = ? AND role != ?', (role, email, role))
+            conn.execute('UPDATE staff_users SET role = ? WHERE lower(email) = ?', (role, email))
+
+
 def provision_from_env() -> None:
     raw = (os.getenv('STAFF_ACCOUNTS_JSON') or os.getenv('TEACHER_ACCOUNTS_JSON', '')).strip()
     if raw:
@@ -79,6 +97,7 @@ def main() -> None:
                 output.write(content)
     init_db()
     created = provision(accounts)
+    enforce_staff_access()
     print(f'Created {len(created)} staff accounts. Existing passwords were preserved.')
     print(f'Credentials: {credentials_path}')
     print(f'Production STAFF_ACCOUNTS_JSON: {manifest_path}')
