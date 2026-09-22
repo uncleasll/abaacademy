@@ -22,6 +22,8 @@ export interface NavItem {
 export const navByRole: Record<Role, NavItem[]> = {
   "IT Admin": [
     { key: "overview", label: "Overview", icon: LayoutGrid },
+    { key: "applications", label: "Registration", icon: FileCheck2 },
+    { key: "groups", label: "Groups & Placement", icon: Users },
     { key: "users", label: "Users & Roles", icon: UserCog },
     { key: "students", label: "Students", icon: Users },
     { key: "tuition", label: "Tuition & Payments", icon: Wallet },
@@ -36,6 +38,7 @@ export const navByRole: Record<Role, NavItem[]> = {
   ],
   Registration: [
     { key: "applications", label: "Applications", icon: FileCheck2 },
+    { key: "groups", label: "Groups & Placement", icon: Users },
     { key: "directory", label: "Directory", icon: Users },
     { key: "schedule", label: "Weekly Schedule", icon: CalendarClock },
   ],

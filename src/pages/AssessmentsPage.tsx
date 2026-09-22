@@ -38,7 +38,7 @@ function assessmentAverage(record: Omit<AssessmentRecord, "studentId" | "quarter
 
 export function AssessmentsPage() {
   const { assessmentRecords, classGroups, students, updateAssessmentRecord, user } = useAcademy();
-  const teacherName = user?.name.split(" ")[0] ?? "";
+  const teacherName = user?.teacherAlias ?? "";
   const teacherStudents = students.filter((student) => student.teacher === teacherName);
   const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
   const [quarter, setQuarter] = useState<QuarterKey>("Q1");

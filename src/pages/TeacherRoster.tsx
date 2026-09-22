@@ -87,7 +87,7 @@ export function TeacherRoster() {
     updateStudent,
     user,
   } = useAcademy();
-  const teacherName = user?.name.split(" ")[0] ?? "";
+  const teacherName = user?.teacherAlias ?? "";
   const teacherStudents = useMemo(
     () => students.filter((student) => student.teacher === teacherName),
     [students, teacherName]

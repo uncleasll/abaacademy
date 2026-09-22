@@ -35,7 +35,7 @@ export function RegistrationDirectory() {
 
   const teacherNames = useMemo(() => {
     const names = new Set<string>();
-    teachers.forEach((teacher) => names.add(teacher.name.split(" ")[0]));
+    teachers.forEach((teacher) => names.add((teacher.teacherAlias ?? "")));
     students.forEach((student) => names.add(student.teacher));
     classGroups.forEach((group) => names.add(group.teacher));
     return Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b));
@@ -114,7 +114,7 @@ export function RegistrationDirectory() {
 
           <div className="max-h-[540px] divide-y divide-line overflow-y-auto">
             {teachers.map((teacher) => {
-              const assigned = students.filter((student) => student.teacher === teacher.name.split(" ")[0]).length;
+              const assigned = students.filter((student) => student.teacher === (teacher.teacherAlias ?? "")).length;
               return (
                 <div key={teacher.id} className="flex min-w-0 items-center justify-between gap-3 px-4 py-3">
                   <div className="min-w-0">

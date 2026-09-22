@@ -165,6 +165,7 @@ export const classGroups: ClassGroup[] = [
 ];
 
 export interface StaffUser {
+  teacherAlias?: string;
   id: string;
   name: string;
   role: "IT Admin" | "Finance" | "Teacher" | "Registration";

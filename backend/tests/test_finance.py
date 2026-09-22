@@ -35,7 +35,7 @@ class FinanceTest(unittest.TestCase):
         self.assertEqual(data['attendanceRecords'], [])
         self.assertEqual(data['invoices'], [])
         self.assertFalse(student['billingConfigured'])
-        self.assertEqual(data['classGroups'][0]['enrolled'], 1)
+        self.assertEqual(next(g for g in data['classGroups'] if g['id']=='existing-group')['enrolled'], 1)
         self.call('/api/applications/' + application['id'] + '/status', {'status': 'accepted'}, tokens['support'], 'PATCH')
         self.assertEqual(len(self.call('/api/bootstrap', token=finance)[1]['students']), 1)
 
@@ -113,7 +113,7 @@ class FinanceTest(unittest.TestCase):
         self.assertEqual(self.call('/api/finance/billing-plan', plan, finance, 'PUT')[0], 200)
         data = self.call('/api/bootstrap', token=finance)[1]
         self.assertEqual(len(data['invoices']), 3)
-        self.assertEqual(data['classGroups'][0]['enrolled'], 0)
+        self.assertEqual(next(g for g in data['classGroups'] if g['id']=='existing-group')['enrolled'], 0)
 
 
 class OpeningBalanceTest(unittest.TestCase):

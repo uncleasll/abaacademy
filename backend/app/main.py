@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from . import finance
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
-    ApplicationCreate,
+    ApplicationCreate, StaffEdit, StaffPasswordReset, GroupWrite, PlacementWrite,
     AssessmentRecordPatch,
     AttendanceRecordPatch,
     LoginRequest,
@@ -24,7 +24,7 @@ from .schemas import (
     StudentPatch,
     TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid,
 )
-from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env
+from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env, provision_teacher_groups
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
@@ -58,6 +58,7 @@ def startup() -> None:
     init_db()
     provision_from_env()
     enforce_staff_access()
+    provision_teacher_groups()
 
 
 def student_row(row):
@@ -138,6 +139,7 @@ def staff_row(row):
         "email": data["email"],
         "status": data["status"],
         "lastActive": data["last_active"],
+        "teacherAlias": STAFF_ACCOUNTS.get(data["email"].lower(), ("", ""))[0] if data["role"] == "Teacher" else "",
     }
 
 
@@ -150,6 +152,7 @@ def auth_user_row(row):
         "role": data["role"],
         "status": data["status"],
         "mustChangePassword": bool(data["must_change_password"]),
+        "teacherAlias": STAFF_ACCOUNTS[data["email"].lower()][0] if data["role"] == "Teacher" else "",
     }
 
 
@@ -216,6 +219,7 @@ def enroll_accepted_application(conn, application) -> None:
     ).fetchone()
     if existing:
         return
+    validate_placement(conn, application["klass"], application["teacher"], require_seat=True)
     next_rank = conn.execute("SELECT COALESCE(MAX(rank), 0) + 1 AS rank FROM students").fetchone()["rank"]
     student_id = f"s-{uuid4().hex[:10]}"
     parent_name = f"{application['parent_name']} {application['parent_surname']}".strip()
@@ -538,6 +542,14 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
     app_id = f"a-{uuid4().hex[:10]}"
     submitted = date.today().isoformat()
     with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        group = validate_placement(conn, payload.klass, payload.teacher)
+        if not payload.name.strip() or not payload.parentName.strip() or not payload.phone.strip():
+            raise HTTPException(422, "Student name, parent name and phone are required")
+        if conn.execute("SELECT id FROM applications WHERE lower(trim(name))=? AND phone=? AND status!='rejected'", (payload.name.strip().lower(), payload.phone)).fetchone():
+            raise HTTPException(409, "This student already has an application. Use the existing application or student record.")
+        payload.program = group["program"]
         conn.execute(
             """
             INSERT INTO applications
@@ -559,7 +571,7 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
                 payload.teacher,
                 payload.klass,
                 submitted,
-                "pending",
+                "accepted" if payload.intakeMode == "enroll" else "teacher_review" if payload.intakeMode == "review" else "pending",
                 payload.emergencyContact1Name,
                 payload.emergencyContact1Phone,
                 payload.emergencyContact1Relation,
@@ -570,6 +582,8 @@ def create_application(payload: ApplicationCreate, user=Depends(require_roles("I
             ),
         )
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+        if payload.intakeMode == "enroll":
+            enroll_accepted_application(conn, row)
     audit("application.created", {"applicationId": app_id, "actorId": user["id"]})
     return application_row(row)
 
@@ -585,6 +599,13 @@ def update_application_status(application_id: str, payload: StatusPatch, user=De
         if user["role"] == "Teacher":
             if exists["teacher"] != teacher_alias(user) or exists["status"] != "teacher_review" or payload.status not in {"accepted", "rejected"}:
                 raise HTTPException(status_code=403, detail="Teachers can only accept or reject their assigned review applicants")
+        if payload.status not in {"pending", "assessment", "interview", "teacher_review", "waitlist", "accepted", "rejected"}:
+            raise HTTPException(422, "Invalid application status")
+        if exists["status"] == "accepted" and payload.status != "accepted":
+            raise HTTPException(409, "Student is already enrolled. Manage their enrollment from the student record.")
+        if payload.status == "teacher_review":
+            current = conn.execute("SELECT * FROM applications WHERE id=?", (application_id,)).fetchone()
+            validate_placement(conn, current["klass"], current["teacher"])
         conn.execute("UPDATE applications SET status = ? WHERE id = ?", (payload.status, application_id))
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
         if payload.status == "accepted":
@@ -790,3 +811,102 @@ def audit_log(user=Depends(require_roles("IT Admin"))):
     with connect() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 50").fetchall())
     return {"events": rows}
+
+
+def validate_placement(conn, klass, teacher, require_seat=False):
+    group = conn.execute("SELECT * FROM class_groups WHERE name=?" + (" FOR UPDATE" if conn.postgres else ""), (klass,)).fetchone()
+    if not group or group["teacher"] != teacher:
+        raise HTTPException(422, "Select an existing group belonging to this teacher")
+    active = [STAFF_ACCOUNTS[r["email"].lower()][0] for r in conn.execute("SELECT email FROM staff_users WHERE role='Teacher' AND status='active'").fetchall() if r["email"].lower() in STAFF_ACCOUNTS]
+    if teacher not in active:
+        raise HTTPException(422, "This teacher is not active")
+    count = conn.execute("SELECT COUNT(*) AS n FROM students WHERE klass=? AND enrollment_status='active'", (klass,)).fetchone()["n"]
+    if require_seat and count >= group["capacity"]:
+        raise HTTPException(409, "This group is full. Choose another group or increase capacity.")
+    return group
+
+
+@app.patch("/api/users/{user_id}")
+def edit_staff(user_id: str, payload: StaffEdit, user=Depends(require_roles("IT Admin"))):
+    name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(422, "Enter the staff member's name")
+    with connect() as conn:
+        target = conn.execute("SELECT * FROM staff_users WHERE id=?", (user_id,)).fetchone()
+        if not target or target["email"].lower() not in STAFF_ACCOUNTS:
+            raise HTTPException(404, "Approved staff account not found")
+        conn.execute("UPDATE staff_users SET name=? WHERE id=?", (name, user_id))
+        finance.audit_in_transaction(conn, "user.edited", {"actorId": user["id"], "userId": user_id, "name": name})
+        result = staff_row(conn.execute("SELECT * FROM staff_users WHERE id=?", (user_id,)).fetchone())
+    return result
+
+
+@app.post("/api/users/{user_id}/reset-password")
+def reset_staff_password(user_id: str, payload: StaffPasswordReset, user=Depends(require_roles("IT Admin"))):
+    if user_id == user["id"]:
+        raise HTTPException(400, "Use Change password to change your own administrator password")
+    digest, salt = hash_password(payload.temporaryPassword)
+    with connect() as conn:
+        target = conn.execute("SELECT email FROM staff_users WHERE id=?", (user_id,)).fetchone()
+        if not target or target["email"].lower() not in STAFF_ACCOUNTS:
+            raise HTTPException(404, "Approved staff account not found")
+        conn.execute("UPDATE auth_accounts SET password_hash=?, password_salt=?, must_change_password=1, token_version=token_version+1 WHERE staff_user_id=?", (digest, salt, user_id))
+        finance.audit_in_transaction(conn, "user.password_reset", {"actorId": user["id"], "userId": user_id})
+    return {"ok": True}
+
+
+@app.post("/api/groups", status_code=201)
+def create_group(payload: GroupWrite, user=Depends(require_roles("IT Admin", "Registration"))):
+    return save_group(None, payload, user)
+
+
+@app.put("/api/groups/{group_id}")
+def edit_group(group_id: str, payload: GroupWrite, user=Depends(require_roles("IT Admin", "Registration"))):
+    return save_group(group_id, payload, user)
+
+
+def save_group(group_id, payload, user):
+    if len(payload.name.strip()) < 2 or len(payload.program.strip()) < 2:
+        raise HTTPException(422, "Group name and program must contain at least two characters")
+    with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        teachers = [STAFF_ACCOUNTS[r["email"].lower()][0] for r in conn.execute("SELECT email FROM staff_users WHERE role='Teacher' AND status='active'").fetchall() if r["email"].lower() in STAFF_ACCOUNTS]
+        if payload.teacher not in teachers:
+            raise HTTPException(422, "Select an active teacher")
+        existing = conn.execute("SELECT * FROM class_groups WHERE id=?" + (" FOR UPDATE" if conn.postgres else ""), (group_id,)).fetchone() if group_id else None
+        if group_id and not existing:
+            raise HTTPException(404, "Group not found")
+        duplicate = conn.execute("SELECT id FROM class_groups WHERE name=?", (payload.name.strip(),)).fetchone()
+        if duplicate and duplicate["id"] != group_id:
+            raise HTTPException(409, "Group name already exists")
+        if existing:
+            count = conn.execute("SELECT COUNT(*) AS n FROM students WHERE klass=? AND enrollment_status='active'", (existing["name"],)).fetchone()["n"]
+            if payload.capacity < count:
+                raise HTTPException(409, "Capacity cannot be below the current student count")
+            conn.execute("UPDATE students SET klass=?, teacher=? WHERE klass=?", (payload.name.strip(), payload.teacher, existing["name"]))
+            conn.execute("UPDATE applications SET klass=?, teacher=?, program=? WHERE klass=?", (payload.name.strip(), payload.teacher, payload.program, existing["name"]))
+            conn.execute("UPDATE class_groups SET name=?,teacher=?,program=?,schedule=?,capacity=? WHERE id=?", (payload.name.strip(), payload.teacher, payload.program, payload.schedule, payload.capacity, group_id))
+        else:
+            group_id = str(uuid4())
+            conn.execute("INSERT INTO class_groups VALUES (?, ?, ?, ?, ?, ?, 0)", (group_id,payload.name.strip(),payload.teacher,payload.program,payload.schedule,payload.capacity))
+        finance.audit_in_transaction(conn, "group.saved", {"actorId":user["id"], "groupId":group_id})
+    return {"id":group_id}
+
+
+@app.put("/api/students/{student_id}/placement")
+def transfer_student(student_id: str, payload: PlacementWrite, user=Depends(require_roles("IT Admin", "Registration"))):
+    with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        group = conn.execute("SELECT * FROM class_groups WHERE id=?" + (" FOR UPDATE" if conn.postgres else ""), (payload.groupId,)).fetchone()
+        if not group:
+            raise HTTPException(404, "Group not found")
+        student = conn.execute("SELECT * FROM students WHERE id=?" + (" FOR UPDATE" if conn.postgres else ""), (student_id,)).fetchone()
+        if not student:
+            raise HTTPException(404, "Student not found")
+        validate_placement(conn, group["name"], group["teacher"], require_seat=student["klass"] != group["name"] and student["enrollment_status"] == "active")
+        conn.execute("UPDATE students SET klass=?,teacher=? WHERE id=?", (group["name"],group["teacher"],student_id))
+        conn.execute("UPDATE applications SET klass=?,teacher=?,program=? WHERE name=? AND phone=? AND status='accepted'", (group["name"],group["teacher"],group["program"],student["name"],student["parent_phone"]))
+        finance.audit_in_transaction(conn,"student.transferred",{"actorId":user["id"],"studentId":student_id,"groupId":payload.groupId})
+    return {"ok":True}

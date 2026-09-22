@@ -41,9 +41,14 @@ export interface AuthUser {
   role: StaffUser["role"];
   status: StaffUser["status"];
   mustChangePassword: boolean;
+  teacherAlias?: string;
 }
 
 interface AcademyStore extends BootstrapData {
+  editStaff: (id: string, name: string) => Promise<void>;
+  resetStaffPassword: (id: string, temporaryPassword: string) => Promise<void>;
+  saveGroup: (id: string | null, payload: Omit<ClassGroup, "id" | "enrolled">) => Promise<void>;
+  transferStudent: (id: string, groupId: string) => Promise<void>;
   recordPayment: (payload: PaymentInput) => Promise<void>;
   createInvoice: (payload: InvoiceInput) => Promise<void>;
   saveBillingPlan: (payload: BillingPlan) => Promise<void>;
@@ -62,7 +67,7 @@ interface AcademyStore extends BootstrapData {
   updateAttendanceRecord: (studentId: string, date: string, present: boolean) => Promise<void>;
   updateTuitionRecord: (studentId: string, month: string, status: TuitionRecord["status"], amount: number) => Promise<void>;
   updateAssessmentRecord: (record: AssessmentRecord) => Promise<void>;
-  createApplication: (payload: Omit<Application, "id" | "submitted" | "status">) => Promise<Application>;
+  createApplication: (payload: Omit<Application, "id" | "submitted" | "status"> & { intakeMode?: "application" | "review" | "enroll" }) => Promise<Application>;
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
   createUser: (payload: Pick<StaffUser, "name" | "email" | "role">) => Promise<StaffUser & { temporaryPassword: string }>;
   updateUserStatus: (id: string, status: StaffUser["status"]) => Promise<StaffUser | undefined>;
@@ -260,6 +265,10 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     };
+    const editStaff: AcademyStore["editStaff"] = (id, name) => financeMutation(`/api/users/${id}`, { name }, "PATCH");
+    const resetStaffPassword: AcademyStore["resetStaffPassword"] = (id, temporaryPassword) => financeMutation(`/api/users/${id}/reset-password`, { temporaryPassword });
+    const saveGroup: AcademyStore["saveGroup"] = (id, payload) => financeMutation(id ? `/api/groups/${id}` : "/api/groups", payload, id ? "PUT" : "POST");
+    const transferStudent: AcademyStore["transferStudent"] = (id, groupId) => financeMutation(`/api/students/${id}/placement`, { groupId }, "PUT");
     const recordPayment: AcademyStore["recordPayment"] = payload => financeMutation("/api/finance/payments", payload, "POST", true);
     const createInvoice: AcademyStore["createInvoice"] = payload => financeMutation("/api/finance/invoices", payload, "POST", true);
     const saveBillingPlan: AcademyStore["saveBillingPlan"] = payload => financeMutation("/api/finance/billing-plan", payload, "PUT");
@@ -322,7 +331,9 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
 
     const createApplication: AcademyStore["createApplication"] = async payload => {
       const created = await request<Application>("/api/applications", { method: "POST", body: JSON.stringify(payload) });
-      setData(prev => ({ ...prev, applications: [created, ...prev.applications] }));
+      const fresh = await request<BootstrapData>("/api/bootstrap");
+      ++requestVersion.current;
+      setData({ ...fallbackData, ...fresh });
       setApiOnline(true);
       return created;
     };
@@ -454,6 +465,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
 
     return {
       ...data,
+      editStaff, resetStaffPassword, saveGroup, transferStudent,
       recordPayment, createInvoice, saveBillingPlan, voidPayment,
       loading,
       authLoading,

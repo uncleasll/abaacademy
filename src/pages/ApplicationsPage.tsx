@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowRight, Clock3, Mail, Phone, Plus, Search, UserRoundPlus, UsersRound } from "lucide-react";
-import { type Application, type AppStatus, classGroups as fallbackClassGroups } from "../data/mockData";
+import { type Application, type AppStatus } from "../data/mockData";
 import { useAcademy } from "../data/academyStore";
 
 const pipelineStages: { key: AppStatus; label: string; empty: string }[] = [
@@ -39,9 +39,9 @@ const emptyForm = {
   emergencyContact2Relation: "",
   parentTelegram: "",
   address: "",
-  program: fallbackClassGroups[0]?.program ?? "",
-  teacher: fallbackClassGroups[0]?.teacher ?? "",
-  klass: fallbackClassGroups[0]?.name ?? "",
+  program: "",
+  teacher: "",
+  klass: "",
 };
 
 function IntakeStat({
@@ -185,14 +185,21 @@ function ApplicantCard({
 }
 
 export function ApplicationsPage() {
-  const { applications: apps, classGroups, createApplication, students, updateApplicationStatus } = useAcademy();
+  const { applications: apps, staffUsers, classGroups, createApplication, students, updateApplicationStatus } = useAcademy();
   const [form, setForm] = useState(emptyForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [intakeMode, setIntakeMode] = useState<"enroll" | "review">("enroll");
+  useEffect(() => {
+    const validGroups = classGroups.filter(g => staffUsers.some(u => u.role === "Teacher" && u.status === "active" && u.teacherAlias === g.teacher));
+    if (!validGroups.length) return;
+    setForm(prev => validGroups.some(g => g.name === prev.klass && g.teacher === prev.teacher) ? prev : { ...prev, klass: validGroups[0].name, teacher: validGroups[0].teacher, program: validGroups[0].program });
+  }, [classGroups, staffUsers]);
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("Admissions pipeline is ready.");
 
-  const teachers = useMemo(() => Array.from(new Set(classGroups.map((group) => group.teacher))), [classGroups]);
+  const teachers = useMemo(() => staffUsers.filter(u => u.role === "Teacher" && u.status === "active").map(u => u.teacherAlias!).filter(Boolean), [staffUsers]);
   const groupOptions = useMemo(
     () => classGroups.filter((group) => group.teacher === form.teacher).map((group) => group.name),
     [classGroups, form.teacher]
@@ -257,8 +264,11 @@ export function ApplicationsPage() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
     try {
     const newApp = await createApplication({
+      intakeMode,
       name: form.name.trim(),
       age: Number(form.age),
       parentName: form.parentName.trim(),
@@ -278,8 +288,8 @@ export function ApplicationsPage() {
       klass: form.klass,
     });
     setNotice(`${newApp.name} registered and assigned to ${newApp.klass}.`);
-    setForm(emptyForm);
-    } catch (error) { setNotice(`Registration was not confirmed: ${error instanceof Error ? error.message : "connection error"}. Refresh before retrying.`); }
+    setForm({ ...emptyForm, teacher: form.teacher, klass: form.klass, program: form.program });
+    } catch (error) { setNotice(`Registration was not confirmed: ${error instanceof Error ? error.message : "connection error"}. Refresh before retrying.`); } finally { setSubmitting(false); }
   };
 
   return (
@@ -448,6 +458,8 @@ export function ApplicationsPage() {
             </div>
 
             <form onSubmit={submit} className="space-y-3">
+              {!classGroups.length && <p role="alert" className="text-sm text-red-700">No placement groups yet. Open Groups & Placement to create one.</p>}
+              <label className="block text-sm font-semibold">Registration result<select className="mt-1 w-full rounded-lg border border-line p-3" value={intakeMode} onChange={e => setIntakeMode(e.target.value as "enroll" | "review")}><option value="enroll">Enroll directly in the selected group</option><option value="review">Send to teacher for review first</option></select></label>
               <div className="rounded-lg border border-line bg-cream/45 p-3">
                 <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Student</p>
                 <div className="grid gap-3 sm:grid-cols-[1fr_88px]">
@@ -463,11 +475,11 @@ export function ApplicationsPage() {
                 <p className="mb-3 text-xs font-semibold uppercase text-ink/45">Parent</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="First name" value={form.parentName} onChange={(parentName) => updateForm({ parentName })} placeholder="Parent first name" />
-                  <Field label="Last name" value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
+                  <Field label="Last name" required={false} value={form.parentSurname} onChange={(parentSurname) => updateForm({ parentSurname })} placeholder="Parent last name" />
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field label="Phone" value={form.phone} onChange={(phone) => updateForm({ phone: formatPhone(phone) })} placeholder="(718) 555-0199" />
-                  <Field label="Email" type="email" value={form.email} onChange={(email) => updateForm({ email })} placeholder="parent@example.com" />
+                  <Field label="Email" required={false} type="email" value={form.email} onChange={(email) => updateForm({ email })} placeholder="parent@example.com" />
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field label="Telegram" value={form.parentTelegram} onChange={(parentTelegram) => updateForm({ parentTelegram })} placeholder="@parent" required={false} />
@@ -495,7 +507,7 @@ export function ApplicationsPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 text-xs font-semibold text-ink/55">
                     Teacher
-                    <select
+                    <select aria-label="Teacher"
                       value={form.teacher}
                       onChange={(event) => handleTeacherChange(event.target.value)}
                       className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
@@ -507,7 +519,7 @@ export function ApplicationsPage() {
                   </label>
                   <label className="space-y-1.5 text-xs font-semibold text-ink/55">
                     Group
-                    <select
+                    <select aria-label="Group"
                       value={form.klass}
                       onChange={(event) => handleGroupChange(event.target.value)}
                       className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium text-ink outline-none focus:border-gold-500"
@@ -528,8 +540,8 @@ export function ApplicationsPage() {
                 )}
               </div>
 
-              <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-3 text-sm font-semibold text-cream hover:bg-green-800">
-                <Plus size={17} /> Register and assign
+              <button disabled={submitting || !selectedGroup} className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-3 text-sm font-semibold text-cream hover:bg-green-800">
+                <Plus size={17} /> {submitting ? "Saving…" : intakeMode === "enroll" ? "Register & enroll student" : "Register & send for review"}
               </button>
             </form>
           </section>

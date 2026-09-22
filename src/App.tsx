@@ -1,3 +1,4 @@
+import { GroupsPage } from "./pages/GroupsPage";
 import { useEffect, useState } from "react";
 import { MobileNav, Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -28,6 +29,8 @@ const defaultTab: Record<Role, string> = {
 function PageFor({ role, tab }: { role: Role; tab: string }) {
   if (role === "IT Admin") {
     if (tab === "overview") return <AdminOverview />;
+    if (tab === "applications") return <ApplicationsPage />;
+    if (tab === "groups") return <GroupsPage />;
     if (tab === "users") return <UsersPage />;
     if (tab === "students") return <StudentsPage />;
     if (tab === "tuition") return <TuitionPage />;
@@ -42,6 +45,7 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
     if (tab === "report") return <TeacherReport />;
   }
   if (role === "Registration") {
+    if (tab === "groups") return <GroupsPage />;
     if (tab === "applications") return <ApplicationsPage />;
     if (tab === "directory") return <RegistrationDirectory />;
     if (tab === "schedule") return <SchedulePage />;

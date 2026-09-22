@@ -105,3 +105,13 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
+def provision_teacher_groups() -> None:
+    """Supply editable placement groups for the five configured teachers, without demo students."""
+    with connect() as conn:
+        for email, name in TEACHERS.items():
+            if conn.execute("SELECT id FROM class_groups WHERE teacher=?", (name,)).fetchone():
+                continue
+            conn.execute("INSERT INTO class_groups VALUES (?, ?, ?, ?, ?, ?, 0) ON CONFLICT DO NOTHING",
+                         ("group-"+email.split("@")[0], name+" — General", name, "General", "Schedule not set", 30))

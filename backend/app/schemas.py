@@ -71,6 +71,7 @@ class Application(BaseModel):
 
 
 class ApplicationCreate(BaseModel):
+    intakeMode: Literal["application", "review", "enroll"] = "application"
     name: str
     age: int = Field(ge=3, le=18)
     parentName: str
@@ -227,3 +228,23 @@ class PaymentVoid(BaseModel):
         if len(self.reason) < 5:
             raise ValueError('Enter a reason of at least five characters')
         return self
+
+
+class StaffEdit(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+
+class StaffPasswordReset(BaseModel):
+    temporaryPassword: str = Field(min_length=12, max_length=128)
+
+
+class GroupWrite(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    teacher: str
+    program: str = Field(min_length=2, max_length=100)
+    schedule: str = Field(default='', max_length=200)
+    capacity: int = Field(ge=1, le=200)
+
+
+class PlacementWrite(BaseModel):
+    groupId: str
