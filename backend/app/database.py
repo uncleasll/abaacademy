@@ -167,12 +167,19 @@ def init_db() -> None:
                 "students", "applications", "class_groups", "staff_users", "auth_accounts",
                 "meetings", "attendance_records", "tuition_records", "assessment_records", "audit_log",
             ):
-                conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+                secured = conn.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(?)", (table,)).fetchone()
+                if not secured or not secured["relrowsecurity"]:
+                    conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
 
     # Separate transactions prevent an old-schema migration failure from aborting the full startup.
     for migration in MIGRATIONS:
         try:
             with connect() as conn:
+                if conn.postgres:
+                    parts = migration.split()
+                    exists = conn.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=? AND column_name=?", (parts[2], parts[5])).fetchone()
+                    if exists:
+                        continue
                 sql = migration.replace("ADD COLUMN ", "ADD COLUMN IF NOT EXISTS ") if conn.postgres else migration
                 conn.execute(sql)
         except sqlite3.OperationalError as exc:

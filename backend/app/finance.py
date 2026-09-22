@@ -53,7 +53,9 @@ def init_finance(conn):
             conn.execute(statement)
     if conn.postgres:
         for table in ('billing_plans', 'invoices', 'payments', 'finance_requests', 'finance_migrations'):
-            conn.execute(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY')
+            secured = conn.execute('SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(?)', (table,)).fetchone()
+            if not secured or not secured['relrowsecurity']:
+                conn.execute(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY')
     # Preserve the previously displayed debt once, without pretending historical status cells are receipts.
     marker = conn.execute("INSERT INTO finance_migrations VALUES ('opening-balances-v1') ON CONFLICT DO NOTHING RETURNING name").fetchone()
     if marker:
