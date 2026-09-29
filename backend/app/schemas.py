@@ -183,7 +183,7 @@ class PaymentCreate(BaseModel):
     studentId: str
     invoiceId: str
     amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
-    method: Literal['cash', 'bank_transfer', 'check', 'card_external']
+    method: Literal['cash', 'bank_transfer', 'check', 'card_external', 'zeffy']
     paidOn: date
     reference: str = Field(default='', max_length=200)
     note: str = Field(default='', max_length=1000)
