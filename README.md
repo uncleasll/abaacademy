@@ -66,6 +66,9 @@ Configure the existing Render service with:
 - `JWT_SECRET`: a random secret of at least 32 characters.
 - `FRONTEND_URLS=https://abaacademy.vercel.app` (plus any approved custom frontend origins).
 - `STAFF_ACCOUNTS_JSON`: the full contents of `backend/private/teachers-bootstrap.json`.
+- `PUBLIC_API_URL=https://abaacademy.onrender.com`.
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`: values from BotFather.
+- `TELEGRAM_WEBHOOK_SECRET`: a long random value used only for Telegram webhook verification.
 
 `render.yaml` describes the backend using the existing Supabase database through
 `DATABASE_URL`; it does not create an additional paid database. Applying a Blueprint
@@ -123,3 +126,7 @@ The five approved teachers receive editable starter groups (`Teacher — General
 **Admin → Users & access** edits staff display names, activates/deactivates accounts and assigns temporary passwords. Email/role remain the eight approved account identities. Teacher scoping uses the immutable account alias rather than the editable name. Password resets revoke old sessions and require the staff member to change the temporary password before opening academy data. Startup preserves edited names and existing passwords. Admin can also access Registration and Groups & Placement.
 
 Teacher accounts now open the workspace immediately with their assigned password. Password changes remain available from Change password, but are optional for teachers, including after an administrator reset. Existing teacher password hashes are preserved when the first-login requirement is cleared. Other staff roles retain the first-login requirement.
+
+## Telegram tuition reminders
+
+Accounting can generate a seven-day **Connect parent** link from the Accounting table. Send that link privately to the parent; Telegram requires the parent to open the bot and press Start before the bot is allowed to message them. Once connected, Accounting can send an invoice-specific balance reminder from the same row. The message amount and billing period are calculated from the live finance ledger, and every sent reminder is recorded in the audit log. Bot tokens and webhook secrets belong only in Render environment variables, never in frontend code or Git.

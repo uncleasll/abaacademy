@@ -75,6 +75,8 @@ interface AcademyStore extends BootstrapData {
   createMeeting: (payload: Omit<Meeting, "id">) => Promise<Meeting>;
   deleteMeeting: (id: string) => Promise<void>;
   queueReminder: (payload: Record<string, unknown>) => Promise<void>;
+  createTelegramLink: (studentId: string) => Promise<string>;
+  sendTelegramReminder: (studentId: string, invoiceId?: string) => Promise<void>;
   prepareExport: (payload: Record<string, unknown>) => Promise<void>;
   downloadFinanceExport: () => Promise<void>;
   downloadReceipts: () => Promise<void>;
@@ -420,6 +422,20 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    const createTelegramLink: AcademyStore["createTelegramLink"] = async (studentId) => {
+      const result = await request<{ url: string }>(`/api/telegram/students/${studentId}/link`, { method: "POST" });
+      setApiOnline(true);
+      return result.url;
+    };
+
+    const sendTelegramReminder: AcademyStore["sendTelegramReminder"] = async (studentId, invoiceId) => {
+      await request("/api/telegram/reminders", {
+        method: "POST",
+        body: JSON.stringify({ studentId, invoiceId: invoiceId || null }),
+      });
+      setApiOnline(true);
+    };
+
     const prepareExport: AcademyStore["prepareExport"] = async (payload) => {
       try {
         await request("/api/actions/export", { method: "POST", body: JSON.stringify(payload) });
@@ -489,6 +505,8 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       createMeeting,
       deleteMeeting,
       queueReminder,
+      createTelegramLink,
+      sendTelegramReminder,
       prepareExport,
       downloadFinanceExport,
       downloadReceipts,

@@ -487,9 +487,9 @@ Demo bot preview only.`;
                     : "bg-white"
               }`}
             >
-              <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_250px_190px_120px] xl:items-center">
+              <div className="grid gap-3 xl:grid-cols-[minmax(360px,1fr)_250px_190px_120px] xl:items-center">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 xl:flex-nowrap">
                     <p className="truncate font-semibold text-ink">{student.name}</p>
                     {isNewStudent(student.joinedDate) && (
                       <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
@@ -500,8 +500,11 @@ Demo bot preview only.`;
                     {student.enrollmentStatus === "terminated" && (
                       <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Terminated</span>
                     )}
+                    <span className="hidden truncate text-xs text-ink/45 xl:inline">
+                      {student.klass} · {student.parentPhone}{student.joinedDate ? ` · Joined ${student.joinedDate}` : ""}
+                    </span>
                   </div>
-                  <p className="mt-1 text-xs text-ink/45">
+                  <p className="mt-1 text-xs text-ink/45 xl:hidden">
                     {student.klass} · {student.parentPhone}
                     {student.joinedDate ? ` · Joined ${student.joinedDate}` : ""}
                   </p>

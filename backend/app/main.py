@@ -6,11 +6,11 @@ import io
 import os
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from . import finance
+from . import finance, telegram
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
     ApplicationCreate, StaffEdit, StaffPasswordReset, GroupWrite, PlacementWrite,
@@ -22,7 +22,7 @@ from .schemas import (
     StaffUserCreate,
     StatusPatch,
     StudentPatch,
-    TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid,
+    TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid, TelegramReminder,
 )
 from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env, provision_teacher_groups
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
@@ -59,6 +59,7 @@ def startup() -> None:
     provision_from_env()
     enforce_staff_access()
     provision_teacher_groups()
+    telegram.init_telegram()
 
 
 def student_row(row):
@@ -88,6 +89,8 @@ def student_row(row):
         "enrollmentStatus": data.get("enrollment_status", "active"),
         "financeNote": data.get("finance_note", ""),
         "terminationNote": data.get("termination_note", ""),
+        "telegramConnected": bool(data.get("telegram_chat_id")),
+        "telegramUsername": data.get("telegram_username", "") or "",
     }
 
 
@@ -674,10 +677,33 @@ def delete_meeting(meeting_id: str, user=Depends(require_roles("IT Admin", "Regi
     return None
 
 
+@app.post("/api/telegram/students/{student_id}/link")
+def create_telegram_link(student_id: str, user=Depends(require_roles("IT Admin", "Finance", "Registration"))):
+    link = telegram.create_link(student_id)
+    audit("telegram.link_created", {"studentId": student_id, "actorId": user["id"]})
+    return {"url": link}
+
+
+@app.post("/api/telegram/reminders")
+def send_telegram_reminder(payload: TelegramReminder, user=Depends(require_roles("IT Admin", "Finance"))):
+    result = telegram.send_balance_reminder(payload.studentId, payload.invoiceId)
+    audit("telegram.reminder_sent", {"studentId": payload.studentId, "invoiceId": payload.invoiceId, "actorId": user["id"], "amount": result["amount"]})
+    return result
+
+
+@app.post("/api/telegram/webhook/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    if not telegram.WEBHOOK_SECRET or secret != telegram.WEBHOOK_SECRET:
+        raise HTTPException(404, "Not found")
+    telegram.accept_update(await request.json())
+    return {"ok": True}
+
+
 @app.post("/api/actions/reminder")
-def queue_reminder(payload: dict, user=Depends(require_roles("IT Admin", "Finance", "Teacher"))):
-    audit("reminder.queued", {**payload, "actorId": user["id"]})
-    return {"queued": True}
+def queue_reminder(payload: TelegramReminder, user=Depends(require_roles("IT Admin", "Finance"))):
+    result = telegram.send_balance_reminder(payload.studentId, payload.invoiceId)
+    audit("telegram.reminder_sent", {"studentId": payload.studentId, "invoiceId": payload.invoiceId, "actorId": user["id"], "amount": result["amount"]})
+    return result
 
 
 @app.post("/api/actions/export")

@@ -28,6 +28,8 @@ export interface Student {
   tuitionStatus: PaymentStatus;
   amountDue: number;
   billingConfigured?: boolean;
+  telegramConnected?: boolean;
+  telegramUsername?: string;
   joinedDate?: string;
   enrollmentStatus?: EnrollmentStatus;
   financeNote?: string;

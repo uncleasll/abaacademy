@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS students (
   rank INTEGER NOT NULL DEFAULT 0, tuition_status TEXT NOT NULL DEFAULT 'unpaid',
   amount_due INTEGER NOT NULL DEFAULT 0, joined_date TEXT NOT NULL DEFAULT '',
   enrollment_status TEXT NOT NULL DEFAULT 'active', finance_note TEXT NOT NULL DEFAULT '',
-  termination_note TEXT NOT NULL DEFAULT ''
+  termination_note TEXT NOT NULL DEFAULT '', telegram_chat_id TEXT, telegram_username TEXT
 );
 CREATE TABLE IF NOT EXISTS applications (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, age INTEGER NOT NULL,
@@ -151,6 +151,8 @@ MIGRATIONS = [
     "ALTER TABLE applications ADD COLUMN parent_telegram TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE applications ADD COLUMN email TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE attendance_records ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE students ADD COLUMN telegram_chat_id TEXT",
+    "ALTER TABLE students ADD COLUMN telegram_username TEXT",
 ]
 
 

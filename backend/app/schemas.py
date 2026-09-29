@@ -230,6 +230,11 @@ class PaymentVoid(BaseModel):
         return self
 
 
+class TelegramReminder(BaseModel):
+    studentId: str
+    invoiceId: str | None = None
+
+
 class StaffEdit(BaseModel):
     name: str = Field(min_length=2, max_length=100)
 
