@@ -14,10 +14,15 @@ export function UsersPage() {
     <div className="grid gap-4 lg:grid-cols-2">{staffUsers.filter(u => `${u.name} ${u.email} ${u.role}`.toLowerCase().includes(query.toLowerCase())).map(u => <StaffCard key={`${u.id}:${u.name}`} staff={u} self={u.id === user?.id} busy={busy} onName={name => run(() => editStaff(u.id, name), 'Staff name updated. Teacher assignments preserved.')} onStatus={() => run(() => updateUserStatus(u.id, u.status === 'active' ? 'inactive' : 'active'), 'Access status updated.')} onPassword={password => run(() => resetStaffPassword(u.id, password), u.role === 'Teacher' ? 'Password saved. The teacher can sign in immediately and change it later.' : 'Temporary password saved. The user must change it after login.')} />)}</div>
   </div>;
 }
+function lastSignIn(value: string) {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return "not recorded";
+  return new Date(time).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
 function StaffCard({ staff, self, busy, onName, onStatus, onPassword }: { staff: StaffUser; self: boolean; busy: boolean; onName: (name: string) => Promise<void>; onStatus: () => Promise<void>; onPassword: (password: string) => Promise<void> }) {
   const [name, setName] = useState(staff.name);
   const [password, setPassword] = useState('');
-  return <section className="space-y-3 rounded-xl border border-line bg-white p-5"><div className="flex flex-wrap justify-between gap-2"><h2 className="font-bold">{staff.name}</h2><span className="text-sm text-ink/60">{staff.role} · {staff.status}</span></div><p className="break-all text-sm text-ink/60">{staff.email}</p>
+  return <section className="space-y-3 rounded-xl border border-line bg-white p-5"><div className="flex flex-wrap justify-between gap-2"><h2 className="font-bold">{staff.name}</h2><span className="text-sm text-ink/60">{staff.role} · {staff.status}</span></div><p className="break-all text-sm text-ink/60">{staff.email}</p><p className="text-xs text-ink/45">Last sign-in: {lastSignIn(staff.lastActive)}</p>
     <form className="flex gap-2" onSubmit={e => { e.preventDefault(); void onName(name); }}><input aria-label={`Name for ${staff.email}`} className="min-w-0 flex-1 rounded-lg border border-line p-2" value={name} onChange={e => setName(e.target.value)} required minLength={2} maxLength={100} disabled={busy} /><button disabled={busy} className="rounded-lg bg-green-900 px-3 py-2 text-sm text-cream">Save name</button></form>
     <p className="text-xs text-ink/45">Login email and assigned role remain fixed to the approved account.</p>
     <button disabled={busy || self} className="rounded-lg border border-line px-3 py-2 text-sm disabled:opacity-40" onClick={() => void onStatus()}>{staff.status === 'active' ? 'Deactivate' : 'Activate'} access</button>

@@ -1,6 +1,6 @@
 import { LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { useAcademy } from "../data/academyStore";
+import { ApiError, useAcademy } from "../data/academyStore";
 
 export function LoginPage() {
   const { login } = useAcademy();
@@ -16,9 +16,10 @@ export function LoginPage() {
     try {
       await login(email.trim(), password);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      setError(message.startsWith("401") ? "Email or password is incorrect." :
-        message.startsWith("403") ? "This account is inactive. Please contact your administrator." :
+      const status = error instanceof ApiError ? error.status : 0;
+      setError(status === 401 || status === 422 ? "Email or password is incorrect." :
+        status === 403 ? "This account is inactive. Please contact your administrator." :
+        status === 429 ? "Too many failed attempts. Please wait 15 minutes and try again." :
         "The server is unavailable. Please try again shortly.");
     } finally {
       setSubmitting(false);

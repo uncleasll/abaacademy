@@ -1,6 +1,7 @@
 export interface Invoice {
   id: string; studentId: string; period: string; amount: number; paid: number;
-  balance: number; dueDate: string; status: 'paid' | 'partial' | 'unpaid'; overdue: boolean;
+  balance: number; dueDate: string; status: 'paid' | 'partial' | 'unpaid' | 'void'; overdue: boolean;
+  voided?: boolean; voidReason?: string;
 }
 export interface Payment {
   id: string; invoiceId: string; studentId: string; period: string; amount: number;

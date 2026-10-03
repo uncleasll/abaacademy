@@ -1,21 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CalendarDays, Clock, Save, Users } from "lucide-react";
 import { SectionTitle } from "../components/ui";
+import { useAcademy, type ScheduleBlock } from "../data/academyStore";
 
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
 
 type WeekDay = (typeof days)[number];
-
-interface ClassScheduleBlock {
-  id: string;
-  group: string;
-  teacher: string;
-  day: WeekDay;
-  start: string;
-  end: string;
-  students: number;
-  color: string;
-}
+type ClassScheduleBlock = ScheduleBlock;
 
 const scheduleColors = [
   "bg-sky-200 text-sky-950 border-sky-300",
@@ -26,33 +17,19 @@ const scheduleColors = [
   "bg-rose-200 text-rose-950 border-rose-300",
 ];
 
-const defaultClassSchedule: ClassScheduleBlock[] = [
-  { id: "adham-mon-5", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Monday", start: "17:00", end: "19:00", students: 30, color: scheduleColors[1] },
-  { id: "adham-mon-7", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Monday", start: "19:00", end: "21:00", students: 30, color: scheduleColors[1] },
-  { id: "adham-wed-5", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Wednesday", start: "17:00", end: "19:00", students: 30, color: scheduleColors[1] },
-  { id: "adham-wed-7", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Wednesday", start: "19:00", end: "21:00", students: 30, color: scheduleColors[1] },
-  { id: "adham-fri-5", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Friday", start: "17:00", end: "19:00", students: 30, color: scheduleColors[1] },
-  { id: "adham-fri-7", group: "Adhamjon", teacher: "Adhamjon Qori aka", day: "Friday", start: "19:00", end: "21:00", students: 30, color: scheduleColors[1] },
-  { id: "feruz-tue", group: "Feruz", teacher: "Feruz Qori aka", day: "Tuesday", start: "17:00", end: "19:00", students: 20, color: scheduleColors[3] },
-  { id: "feruz-thu", group: "Feruz", teacher: "Feruz Qori aka", day: "Thursday", start: "17:00", end: "19:00", students: 20, color: scheduleColors[3] },
-  { id: "feruz-sat", group: "Feruz", teacher: "Feruz Qori aka", day: "Saturday", start: "15:00", end: "17:00", students: 20, color: scheduleColors[3] },
-  { id: "behzod-mon", group: "Behzodjon", teacher: "Behzodjon", day: "Monday", start: "18:30", end: "20:30", students: 10, color: scheduleColors[0] },
-  { id: "behzod-thu", group: "Behzodjon", teacher: "Behzodjon", day: "Thursday", start: "18:30", end: "20:30", students: 10, color: scheduleColors[0] },
-  { id: "behzod-sat", group: "Behzodjon", teacher: "Behzodjon", day: "Saturday", start: "18:30", end: "20:30", students: 10, color: scheduleColors[0] },
-  { id: "abdul-mon", group: "Abdulquddus", teacher: "Abdulquddus", day: "Monday", start: "16:00", end: "18:00", students: 23, color: scheduleColors[2] },
-  { id: "abdul-wed", group: "Abdulquddus", teacher: "Abdulquddus", day: "Wednesday", start: "16:00", end: "18:00", students: 23, color: scheduleColors[2] },
-  { id: "abdul-fri", group: "Abdulquddus", teacher: "Abdulquddus", day: "Friday", start: "16:00", end: "18:00", students: 23, color: scheduleColors[2] },
-];
+// Earlier versions kept the schedule in this browser only; it is offered once for saving to the server.
+const LEGACY_SCHEDULE_KEY = "aba_registration_weekly_schedule";
 
-const SCHEDULE_KEY = "aba_registration_weekly_schedule";
-
-function readSchedule() {
-  const raw = localStorage.getItem(SCHEDULE_KEY);
-  if (!raw) return defaultClassSchedule;
+function readLegacySchedule(): ClassScheduleBlock[] {
   try {
-    return JSON.parse(raw) as ClassScheduleBlock[];
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_SCHEDULE_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((block) => ({
+      id: String(block.id), group: String(block.group), teacher: String(block.teacher), day: block.day as WeekDay,
+      start: String(block.start), end: String(block.end), color: String(block.color ?? ""),
+    }));
   } catch {
-    return defaultClassSchedule;
+    return [];
   }
 }
 
@@ -86,18 +63,37 @@ function ScheduleMetric({ label, value, detail }: { label: string; value: string
 }
 
 export function SchedulePage() {
-  const [classSchedule, setClassSchedule] = useState<ClassScheduleBlock[]>(readSchedule);
-  const [editingId, setEditingId] = useState(classSchedule[0]?.id ?? "");
-  const [notice, setNotice] = useState("Weekly teacher schedule is ready.");
+  const { classGroups, saveSchedule: persistSchedule, weeklySchedule } = useAcademy();
+  const [classSchedule, setClassSchedule] = useState<ClassScheduleBlock[]>(weeklySchedule);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(weeklySchedule[0]?.id ?? "");
+  const [notice, setNotice] = useState("The weekly schedule is shared with all staff. Select a class to edit it.");
 
   useEffect(() => {
-    localStorage.setItem(SCHEDULE_KEY, JSON.stringify(classSchedule));
-  }, [classSchedule]);
+    if (dirty) return;
+    if (!weeklySchedule.length) {
+      const legacy = readLegacySchedule();
+      if (legacy.length) {
+        setClassSchedule(legacy);
+        setDirty(true);
+        setNotice("This schedule was only stored on this device. Review it and press Save schedule to share it with all staff.");
+        return;
+      }
+    }
+    setClassSchedule(weeklySchedule);
+  }, [weeklySchedule, dirty]);
+
+  const seats = (group: string) => classGroups.find((item) => item.name === group)?.enrolled ?? 0;
+  const edit = (change: (prev: ClassScheduleBlock[]) => ClassScheduleBlock[]) => {
+    setClassSchedule(change);
+    setDirty(true);
+  };
 
   const editingBlock = classSchedule.find((block) => block.id === editingId) ?? classSchedule[0];
   const teacherCount = new Set(classSchedule.map((block) => block.teacher)).size;
   const weeklyHours = classSchedule.reduce((sum, block) => sum + (timeToMinutes(block.end) - timeToMinutes(block.start)) / 60, 0);
-  const studentSeats = classSchedule.reduce((sum, block) => sum + block.students, 0);
+  const studentSeats = Array.from(new Set(classSchedule.map((block) => block.group))).reduce((sum, group) => sum + seats(group), 0);
   const teachers = Array.from(new Set(classSchedule.map((block) => block.teacher))).sort();
   const scheduleByDay = days.map((day) => ({
     day,
@@ -116,48 +112,63 @@ export function SchedulePage() {
   );
   const updateBlock = (patch: Partial<ClassScheduleBlock>) => {
     if (!editingBlock) return;
-    setClassSchedule((prev) => prev.map((block) => (block.id === editingBlock.id ? { ...block, ...patch } : block)));
+    edit((prev) => prev.map((block) => (block.id === editingBlock.id ? { ...block, ...patch } : block)));
   };
 
   const addBlock = () => {
     const nextColor = scheduleColors[classSchedule.length % scheduleColors.length];
     const next: ClassScheduleBlock = {
       id: `schedule-${Date.now()}`,
-      group: "New group",
-      teacher: "Teacher",
+      group: classGroups[0]?.name ?? "",
+      teacher: classGroups[0]?.teacher ?? "",
       day: "Monday",
       start: "17:00",
       end: "19:00",
-      students: 0,
       color: nextColor,
     };
-    setClassSchedule((prev) => [...prev, next]);
+    if (!next.group) {
+      setNotice("Create a group in Groups & Placement first, then add it to the schedule.");
+      return;
+    }
+    edit((prev) => [...prev, next]);
     setEditingId(next.id);
-    setNotice("New class schedule block added.");
+    setNotice("New class added. Set its group and time, then press Save schedule.");
   };
 
   const deleteBlock = () => {
     if (!editingBlock) return;
-    setClassSchedule((prev) => prev.filter((block) => block.id !== editingBlock.id));
+    edit((prev) => prev.filter((block) => block.id !== editingBlock.id));
     setEditingId(classSchedule.find((block) => block.id !== editingBlock.id)?.id ?? "");
-    setNotice(`${editingBlock.group} schedule block removed.`);
+    setNotice(`${editingBlock.group} class removed. Press Save schedule to apply.`);
   };
 
-  const saveSchedule = (event: FormEvent<HTMLFormElement>) => {
+  const saveSchedule = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editingBlock) return;
-    if (timeToMinutes(editingBlock.end) <= timeToMinutes(editingBlock.start)) {
-      setNotice("End time must be after start time.");
+    if (busy) return;
+    const invalid = classSchedule.find((block) => timeToMinutes(block.end) <= timeToMinutes(block.start));
+    if (invalid) {
+      setEditingId(invalid.id);
+      setNotice(`${invalid.group} on ${invalid.day}: end time must be after start time.`);
       return;
     }
-    const conflict = classSchedule.find((block) => blocksOverlap(editingBlock, block));
-    if (conflict) {
-      setNotice(
-        `Conflict: ${editingBlock.teacher} already has ${conflict.group} on ${conflict.day} from ${displayTime(conflict.start)} to ${displayTime(conflict.end)}.`
-      );
+    const clash = classSchedule.find((block) => conflictIds.has(block.id));
+    if (clash) {
+      const other = classSchedule.find((block) => blocksOverlap(clash, block))!;
+      setEditingId(clash.id);
+      setNotice(`Conflict: ${clash.teacher} already has ${other.group} on ${other.day} from ${displayTime(other.start)} to ${displayTime(other.end)}.`);
       return;
     }
-    setNotice(`${editingBlock.group} ${editingBlock.day} ${displayTime(editingBlock.start)}-${displayTime(editingBlock.end)} saved.`);
+    setBusy(true);
+    try {
+      await persistSchedule(classSchedule);
+      localStorage.removeItem(LEGACY_SCHEDULE_KEY);
+      setDirty(false);
+      setNotice("Weekly schedule saved for all staff.");
+    } catch (error) {
+      setNotice(`Schedule was not saved: ${error instanceof Error ? error.message : "connection error"}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -193,27 +204,6 @@ export function SchedulePage() {
       </div>
 
       <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{notice}</div>
-      <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-bold">Conflict example</p>
-            <p className="mt-1 text-xs font-semibold text-red-900/65">
-              If the same teacher has two classes on the same day with overlapping times, both blocks turn red and save shows a conflict message.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 md:w-[360px]">
-            <div className="rounded-md border border-red-400 bg-red-50 px-3 py-2 text-xs font-bold ring-2 ring-red-300">
-              Monday · 5:00 PM-7:00 PM
-              <span className="mt-1 block font-semibold text-red-800">Adhamjon</span>
-            </div>
-            <div className="rounded-md border border-red-400 bg-red-50 px-3 py-2 text-xs font-bold ring-2 ring-red-300">
-              Monday · 6:30 PM-8:30 PM
-              <span className="mt-1 block font-semibold text-red-800">Adhamjon</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="rounded-lg border border-line bg-white shadow-sm">
           <div className="border-b border-line px-5 py-4">
@@ -234,7 +224,7 @@ export function SchedulePage() {
 
               {scheduleByTeacher.map(({ teacher, blocks }) => {
                 const teacherHours = blocks.reduce((sum, block) => sum + (timeToMinutes(block.end) - timeToMinutes(block.start)) / 60, 0);
-                const teacherStudents = Math.max(...blocks.map((block) => block.students), 0);
+                const teacherStudents = Array.from(new Set(blocks.map((block) => block.group))).reduce((sum, group) => sum + seats(group), 0);
                 return (
                   <div key={teacher} className="contents">
                     <div className="border-r border-t border-line bg-white px-3 py-3">
@@ -266,7 +256,7 @@ export function SchedulePage() {
                                 <span className="block font-bold">{block.group}</span>
                                 <span className="mt-1 block font-semibold text-ink/60">{block.teacher}</span>
                                 <span className="mt-2 block font-semibold">{day}, {displayTime(block.start)} to {displayTime(block.end)}</span>
-                                <span className="mt-1 block font-semibold text-ink/55">{block.students} students</span>
+                                <span className="mt-1 block font-semibold text-ink/55">{seats(block.group)} students</span>
                               </span>
                             </button>
                           ))}
@@ -310,13 +300,13 @@ export function SchedulePage() {
                       <span className="mt-0.5 block truncate text-xs font-semibold opacity-80">{block.teacher}</span>
                       {conflictIds.has(block.id) && <span className="mt-2 block text-[11px] font-bold text-red-700">Schedule conflict</span>}
                       <span className="mt-2 inline-flex items-center gap-1 rounded-md bg-white/55 px-2 py-1 text-[11px] font-bold">
-                        <Users size={12} /> {block.students}
+                        <Users size={12} /> {seats(block.group)}
                       </span>
                       <span className="pointer-events-none absolute left-3 right-3 top-full z-30 mt-2 rounded-lg border border-line bg-white p-3 text-left text-xs text-ink opacity-0 shadow-xl transition group-hover:opacity-100">
                         <span className="block font-bold">{block.group}</span>
                         <span className="mt-1 block font-semibold text-ink/60">{block.teacher}</span>
                         <span className="mt-2 block font-semibold">{block.day}, {displayTime(block.start)} to {displayTime(block.end)}</span>
-                        <span className="mt-1 block font-semibold text-ink/55">{block.students} students</span>
+                        <span className="mt-1 block font-semibold text-ink/55">{seats(block.group)} students</span>
                       </span>
                       </button>
                   ))}
@@ -335,7 +325,7 @@ export function SchedulePage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold text-ink">Edit class</h3>
-              <p className="mt-0.5 text-sm text-ink/45">Changes save on this device.</p>
+              <p className="mt-0.5 text-sm text-ink/45">{dirty ? "Unsaved changes. Press Save schedule to share them." : "Saved for all staff."}</p>
             </div>
             <button
               type="button"
@@ -365,12 +355,24 @@ export function SchedulePage() {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <label className="space-y-1.5 text-xs font-semibold text-ink/55">
                   Group
-                  <input value={editingBlock.group} onChange={(event) => updateBlock({ group: event.target.value })} className="w-full rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500" />
+                  <select
+                    value={editingBlock.group}
+                    onChange={(event) => {
+                      const group = classGroups.find((item) => item.name === event.target.value);
+                      updateBlock({ group: event.target.value, teacher: group?.teacher ?? editingBlock.teacher });
+                    }}
+                    className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm outline-none focus:border-gold-500"
+                  >
+                    {!classGroups.some((group) => group.name === editingBlock.group) && <option>{editingBlock.group}</option>}
+                    {classGroups.map((group) => (
+                      <option key={group.id}>{group.name}</option>
+                    ))}
+                  </select>
                 </label>
-                <label className="space-y-1.5 text-xs font-semibold text-ink/55">
+                <div className="space-y-1.5 text-xs font-semibold text-ink/55">
                   Teacher
-                  <input value={editingBlock.teacher} onChange={(event) => updateBlock({ teacher: event.target.value })} className="w-full rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500" />
-                </label>
+                  <p className="rounded-lg border border-line bg-cream/45 px-3 py-2.5 text-sm font-medium text-ink">{editingBlock.teacher}</p>
+                </div>
               </div>
               <label className="space-y-1.5 text-xs font-semibold text-ink/55">
                 Day
@@ -390,10 +392,6 @@ export function SchedulePage() {
                   <input type="time" value={editingBlock.end} onChange={(event) => updateBlock({ end: event.target.value })} className="w-full rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500" />
                 </label>
               </div>
-              <label className="space-y-1.5 text-xs font-semibold text-ink/55">
-                Students
-                <input type="number" min={0} value={editingBlock.students} onChange={(event) => updateBlock({ students: Number(event.target.value) })} className="w-full rounded-lg border border-line px-3 py-2.5 text-sm outline-none focus:border-gold-500" />
-              </label>
               <div className="grid grid-cols-3 gap-2">
                 {scheduleColors.map((color) => (
                   <button
@@ -406,8 +404,8 @@ export function SchedulePage() {
                 ))}
               </div>
               <div className="flex gap-2">
-                <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800">
-                  <Save size={15} /> Save schedule
+                <button disabled={busy || !dirty} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800 disabled:opacity-50">
+                  <Save size={15} /> {busy ? "Saving…" : dirty ? "Save schedule" : "Saved"}
                 </button>
                 <button type="button" onClick={deleteBlock} className="rounded-lg border border-red-200 px-3 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50">
                   Delete
@@ -415,7 +413,14 @@ export function SchedulePage() {
               </div>
             </form>
           ) : (
-            <p className="mt-4 rounded-lg border border-line bg-cream/45 p-4 text-sm text-ink/45">No class selected.</p>
+            <form onSubmit={saveSchedule} className="mt-4 space-y-3">
+              <p className="rounded-lg border border-line bg-cream/45 p-4 text-sm text-ink/45">No classes yet. Press Add to create the first one.</p>
+              {dirty && (
+                <button disabled={busy} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800 disabled:opacity-50">
+                  <Save size={15} /> {busy ? "Saving…" : "Save schedule"}
+                </button>
+              )}
+            </form>
           )}
         </section>
       </div>

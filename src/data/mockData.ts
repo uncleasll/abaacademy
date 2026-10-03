@@ -40,6 +40,7 @@ export interface AttendanceRecord {
   studentId: string;
   date: string;
   present: boolean;
+  status?: AttendanceStatus;
   note?: string;
 }
 

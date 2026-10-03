@@ -20,6 +20,8 @@ services:
         value: https://abaacademy.vercel.app
       - key: SEED_DEMO_DATA
         value: "false"
+      - key: ACADEMY_TIMEZONE
+        value: America/New_York
       - key: STAFF_ACCOUNTS_JSON
         sync: false
       - key: PUBLIC_API_URL

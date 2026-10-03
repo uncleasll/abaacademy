@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from .clock import academy_today
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS billing_plans (
  student_id TEXT PRIMARY KEY REFERENCES students(id), amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
@@ -16,7 +18,7 @@ CREATE TABLE IF NOT EXISTS billing_plans (
 CREATE TABLE IF NOT EXISTS invoices (
  id TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES students(id), period TEXT NOT NULL,
  amount_cents INTEGER NOT NULL CHECK(amount_cents > 0), due_date TEXT NOT NULL, created_at TEXT NOT NULL,
- UNIQUE(student_id, period)
+ voided_at TEXT, void_reason TEXT, UNIQUE(student_id, period)
 );
 CREATE TABLE IF NOT EXISTS payments (
  id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
@@ -60,13 +62,13 @@ def init_finance(conn):
     marker = conn.execute("INSERT INTO finance_migrations VALUES ('opening-balances-v1') ON CONFLICT DO NOTHING RETURNING name").fetchone()
     if marker:
         for student in conn.execute('SELECT * FROM students WHERE amount_due > 0').fetchall():
-            due = '1970-01-01' if student['tuition_status'] == 'overdue' else date.today().isoformat()
-            conn.execute('INSERT INTO invoices VALUES (?, ?, ?, ?, ?, ?)',
+            due = '1970-01-01' if student['tuition_status'] == 'overdue' else academy_today().isoformat()
+            conn.execute('INSERT INTO invoices(id, student_id, period, amount_cents, due_date, created_at) VALUES (?, ?, ?, ?, ?, ?)',
                          (str(uuid4()), student['id'], 'Opening balance', int(student['amount_due']) * 100, due, now()))
 
 
 def sync_plan(conn, student, today=None):
-    today = today or date.today()
+    today = today or academy_today()
     plan = conn.execute('SELECT * FROM billing_plans WHERE student_id = ?', (student['id'],)).fetchone()
     if not plan or not plan['active'] or student['enrollment_status'] != 'active':
         return
@@ -75,13 +77,14 @@ def sync_plan(conn, student, today=None):
     while month <= last:
         year, number = map(int, month.split('-'))
         due = date(year, number, min(plan['due_day'], monthrange(year, number)[1])).isoformat()
-        conn.execute('INSERT INTO invoices VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(student_id, period) DO NOTHING',
+        conn.execute('INSERT INTO invoices(id, student_id, period, amount_cents, due_date, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(student_id, period) DO NOTHING',
                      (str(uuid4()), student['id'], month, plan['amount_cents'], due, now()))
         month = f'{year + (number == 12):04d}-{number % 12 + 1:02d}'
 
 
 def snapshot(conn, student_ids):
     ids = set(student_ids)
+    today = academy_today().isoformat()
     invoices = []
     payments = []
     totals = {sid: {'amountDue': 0, 'tuitionStatus': 'paid', 'billingConfigured': False} for sid in ids}
@@ -92,13 +95,17 @@ def snapshot(conn, student_ids):
         sid = row['student_id']
         if sid not in ids:
             continue
-        balance = row['amount_cents'] - row['paid']
-        overdue = balance > 0 and row['due_date'] < date.today().isoformat()
-        status = 'paid' if balance == 0 else 'partial' if row['paid'] else 'unpaid'
+        voided = bool(row['voided_at'])
+        balance = 0 if voided else row['amount_cents'] - row['paid']
+        overdue = balance > 0 and row['due_date'] < today
+        status = 'void' if voided else 'paid' if balance == 0 else 'partial' if row['paid'] else 'unpaid'
         invoices.append(dict(id=row['id'], studentId=sid, period=row['period'], amount=row['amount_cents']/100,
-                             paid=row['paid']/100, balance=balance/100, dueDate=row['due_date'], status=status, overdue=overdue))
-        totals[sid]['amountDue'] += balance  # cents until serialization
+                             paid=row['paid']/100, balance=balance/100, dueDate=row['due_date'], status=status, overdue=overdue,
+                             voided=voided, voidReason=row['void_reason'] or ''))
         totals[sid]['billingConfigured'] = True
+        if voided:
+            continue
+        totals[sid]['amountDue'] += balance  # cents until serialization
         if balance and totals[sid]['tuitionStatus'] != 'overdue':
             totals[sid]['tuitionStatus'] = 'overdue' if overdue else 'unpaid'
     for row in conn.execute('SELECT p.*, i.student_id, i.period FROM payments p JOIN invoices i ON i.id = p.invoice_id ORDER BY p.created_at DESC, p.id').fetchall():

@@ -9,7 +9,6 @@ import {
   FileDown,
   Save,
   Search,
-  Send,
   Star,
   UserCheck,
   UserX,
@@ -79,12 +78,12 @@ function SessionStat({
 export function TeacherRoster() {
   const {
     applications,
+    attendanceRecords,
     classGroups,
-    queueReminder,
+    saveClassSession,
     students,
+    today,
     updateApplicationStatus,
-    updateAttendanceRecord,
-    updateStudent,
     user,
   } = useAcademy();
   const teacherName = user?.teacherAlias ?? "";
@@ -96,9 +95,22 @@ export function TeacherRoster() {
     () => classGroups.filter((group) => group.teacher === teacherName),
     [classGroups, teacherName]
   );
-  const [rows, setRows] = useState(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
   const [groupFilter, setGroupFilter] = useState(teacherGroups[0]?.name ?? "All groups");
-  const [sessionDate, setSessionDate] = useState(todayInputValue);
+  const [sessionDate, setSessionDate] = useState(() => today || todayInputValue());
+  const recordedStatus = useMemo(() => {
+    const map = new Map<string, AttendanceStatus>();
+    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.status ?? (record.present ? "present" : "absent")));
+    return map;
+  }, [attendanceRecords]);
+  // Each class day opens with what was recorded for that day; a day not taken yet starts everyone as present.
+  const rowsFor = (date: string) =>
+    teacherStudents.map((student) => ({
+      ...student,
+      attendance: recordedStatus.get(`${student.id}:${date}`) ?? ("present" as AttendanceStatus),
+      nextHwDraft: student.nextHw,
+    }));
+  const [rows, setRows] = useState(() => rowsFor(sessionDate));
+  const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState(true);
   const [sessionState, setSessionState] = useState<"not_started" | "in_progress" | "saved">("not_started");
@@ -106,8 +118,9 @@ export function TeacherRoster() {
   const [notice, setNotice] = useState("Select a group and start today's class session.");
 
   useEffect(() => {
-    if (saved) setRows(teacherStudents.map((student) => ({ ...student, nextHwDraft: student.nextHw })));
-  }, [teacherStudents, saved]);
+    // Unsaved edits are never replaced by a background sync.
+    if (saved) setRows(rowsFor(sessionDate));
+  }, [teacherStudents, recordedStatus, sessionDate, saved]);
 
   useEffect(() => {
     if (groupFilter !== "All groups" || !teacherGroups[0]) return;
@@ -155,8 +168,7 @@ Teacher: ${teacherName}
 
 ${lines.join("\n\n")}
 
-Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} absent.
-Demo bot preview only.`;
+Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} absent.`;
   }, [activeGroup?.name, groupFilter, metrics.absent, metrics.late, metrics.present, sessionDate, teacherName, visibleRows]);
 
   const update = (id: string, patch: Partial<(typeof rows)[number]>) => {
@@ -173,16 +185,28 @@ Demo bot preview only.`;
     setNotice(`${visibleRows.length} students marked ${attendance}.`);
   };
 
+  const dateRecorded = visibleRows.length > 0 && visibleRows.every((row) => recordedStatus.has(`${row.id}:${sessionDate}`));
+
   const saveChanges = async () => {
+    if (saving) return;
+    if (!visibleRows.length) {
+      setNotice("There are no students in this view to save.");
+      return;
+    }
+    setSaving(true);
+    setNotice("Saving class…");
     try {
-      for (const row of visibleRows) {
-        await updateStudent(row.id, { attendance: row.attendance, stars: row.stars, hw: row.hw, nextHw: row.nextHwDraft });
-        await updateAttendanceRecord(row.id, sessionDate, row.attendance !== "absent");
-      }
+      // One request stores the whole class: either every student is saved or none are.
+      await saveClassSession(
+        sessionDate,
+        visibleRows.map((row) => ({ studentId: row.id, attendance: row.attendance, stars: row.stars, hw: row.hw, nextHw: row.nextHwDraft }))
+      );
       setSaved(true); setSessionState("saved");
       setNotice(`${visibleRows.length} student records saved for ${sessionDate}.`);
     } catch (error) {
-      setNotice(`Class save incomplete: ${error instanceof Error ? error.message : "connection error"}. Your draft is kept; retry to finish.`);
+      setNotice(`Class was not saved: ${error instanceof Error ? error.message : "connection error"} Your draft is kept; press Save class to retry.`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -192,20 +216,12 @@ Demo bot preview only.`;
   };
 
   const copyTgMessage = async () => {
-    await navigator.clipboard?.writeText(tgMessage);
-    setNotice("Daily TG form copied.");
-  };
-
-  const queueDemoBot = () => {
-    void queueReminder({
-      type: "teacher-daily-tg-demo",
-      teacher: teacherName,
-      group: groupFilter,
-      date: sessionDate,
-      message: tgMessage,
-      studentCount: visibleRows.length,
-    });
-    setNotice("Demo Telegram bot message queued.");
+    try {
+      await navigator.clipboard.writeText(tgMessage);
+      setNotice("Daily summary copied. Paste it into your class Telegram group.");
+    } catch {
+      setNotice("Copy is blocked by this browser. Select the summary text below and copy it manually.");
+    }
   };
 
   const exportSession = () => {
@@ -237,7 +253,7 @@ Demo bot preview only.`;
     { label: "Start", active: sessionState !== "not_started" },
     { label: "Attendance", active: sessionState === "in_progress" || sessionState === "saved" },
     { label: "Save", active: sessionState === "saved" },
-    { label: "TG demo", active: sessionState === "saved" },
+    { label: "Share summary", active: sessionState === "saved" },
   ];
 
   return (
@@ -266,11 +282,14 @@ Demo bot preview only.`;
                     id="teacher-session-date"
                     type="date"
                     value={sessionDate}
+                    max={today || undefined}
                     onChange={(event) => {
+                      if (!event.target.value) return;
                       setSessionDate(event.target.value);
-                      setSaved(false);
                       setSessionState((current) => (current === "not_started" ? current : "in_progress"));
-                      setNotice(`Class date set to ${event.target.value}.`);
+                      setNotice(saved
+                        ? `Showing the class record for ${event.target.value}.`
+                        : `Class date set to ${event.target.value}. Your unsaved marks will be saved to this date.`);
                     }}
                     className="min-w-0 flex-1 rounded-md border border-line bg-white px-2 py-1 text-sm font-semibold text-ink outline-none focus:border-gold-500"
                   />
@@ -317,10 +336,11 @@ Demo bot preview only.`;
               <button
                 type="button"
                 onClick={sessionState === "not_started" ? startSession : saveChanges}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800"
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream hover:bg-green-800 disabled:opacity-60"
               >
-                {sessionState === "not_started" ? <ClipboardCheck size={16} /> : saved ? <Check size={16} /> : <Save size={16} />}
-                {sessionState === "not_started" ? "Start class" : saved ? "Saved" : "Save class"}
+                {sessionState === "not_started" ? <ClipboardCheck size={16} /> : saved && dateRecorded ? <Check size={16} /> : <Save size={16} />}
+                {sessionState === "not_started" ? "Start class" : saving ? "Saving…" : saved && dateRecorded ? "Saved" : "Save class"}
               </button>
               <button
                 type="button"
@@ -347,8 +367,8 @@ Demo bot preview only.`;
       <details className="rounded-lg border border-line bg-white shadow-sm">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
           <div>
-            <h2 className="text-lg font-bold text-ink">Daily TG bot form demo</h2>
-            <p className="mt-0.5 text-sm text-ink/45">Preview and queue the demo bot message after saving class.</p>
+            <h2 className="text-lg font-bold text-ink">Daily Telegram summary</h2>
+            <p className="mt-0.5 text-sm text-ink/45">Copy the class summary after saving and paste it into your Telegram group.</p>
           </div>
           <ChevronDown size={18} className="text-ink/45" />
         </summary>
@@ -358,14 +378,7 @@ Demo bot preview only.`;
             onClick={copyTgMessage}
             className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink/60 hover:border-gold-500 hover:text-gold-600"
           >
-            <Copy size={14} /> Copy TG form
-          </button>
-          <button
-            type="button"
-            onClick={queueDemoBot}
-            className="inline-flex items-center gap-2 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream hover:bg-green-800"
-          >
-            <Send size={14} /> Queue demo bot
+            <Copy size={14} /> Copy summary
           </button>
         </div>
         <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-line p-5 font-mono text-xs leading-relaxed text-ink/70">
@@ -544,7 +557,8 @@ Demo bot preview only.`;
                       <button
                         key={index}
                         type="button"
-                        onClick={() => update(student.id, { stars: index + 1 })}
+                        aria-label={`${index + 1} star${index ? "s" : ""} for ${student.name}`}
+                        onClick={() => update(student.id, { stars: student.stars === index + 1 ? 0 : index + 1 })}
                         className="inline-flex h-7 w-5 items-center justify-center"
                       >
                         <Star

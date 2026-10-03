@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { CheckSquare, FileDown, Filter, Phone, Search, UserRound } from "lucide-react";
 import { AttendancePill, PaymentPill, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
+import type { AttendanceStatus } from "../data/mockData";
 import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
+import { usd } from "../data/financeTypes";
 
 function DirectoryStat({
   label,
@@ -34,7 +36,17 @@ function DirectoryStat({
 }
 
 export function StudentsPage() {
-  const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord } = useAcademy();
+  const { attendanceDates, attendanceRecords, classGroups, students, updateAttendanceRecord, updateStudent } = useAcademy();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [enrollmentNote, setEnrollmentNote] = useState("");
+  const run = async (action: () => Promise<void>, success: string) => {
+    if (busy) return;
+    setBusy(true);
+    try { await action(); setNotice(success); }
+    catch (error) { setNotice(`Not saved: ${error instanceof Error ? error.message : "connection error"}`); }
+    finally { setBusy(false); }
+  };
   const [teacherFilter, setTeacherFilter] = useState("All teachers");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [riskFilter, setRiskFilter] = useState("All students");
@@ -74,16 +86,18 @@ export function StudentsPage() {
   };
 
   const attendanceMap = useMemo(() => {
-    const map = new Map<string, boolean>();
-    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.present));
+    const map = new Map<string, AttendanceStatus>();
+    attendanceRecords.forEach((record) => map.set(`${record.studentId}:${record.date}`, record.status ?? (record.present ? "present" : "absent")));
     return map;
   }, [attendanceRecords]);
 
   const selectedAttendance = attendanceDates.map((date) => ({
     date,
-    present: selected ? attendanceMap.get(`${selected.id}:${date}`) ?? false : false,
+    // Days with no record (another group's class day, or before the student joined) are not absences.
+    status: selected ? attendanceMap.get(`${selected.id}:${date}`) : undefined,
   }));
-  const missedCount = selectedAttendance.filter((record) => !record.present).length;
+  const missedCount = selectedAttendance.filter((record) => record.status === "absent").length;
+  const statusLabel = (status?: AttendanceStatus) => (status ? status[0].toUpperCase() + status.slice(1) : "");
   const overdueCount = students.filter((student) => student.tuitionStatus === "overdue").length;
   const lowAttendanceCount = students.filter((student) => student.attendancePct < 80 || student.attendance === "absent").length;
 
@@ -131,7 +145,7 @@ export function StudentsPage() {
         `${student.overall}%`,
         student.status,
         student.enrollmentStatus ?? "active",
-        ...attendanceDates.map((date) => (attendanceMap.get(`${student.id}:${date}`) ? "Present" : "Absent")),
+        ...attendanceDates.map((date) => statusLabel(attendanceMap.get(`${student.id}:${date}`))),
       ]),
     ]);
   };
@@ -316,11 +330,11 @@ export function StudentsPage() {
                   <div className="rounded-lg border border-line bg-white p-3">
                     <p className="text-xs font-semibold uppercase text-ink/40">Attendance</p>
                     <p className="mt-2 text-xl font-bold text-ink">{selected.attendancePct}%</p>
-                    <p className="mt-1 text-xs text-ink/45">{missedCount} missed records</p>
+                    <p className="mt-1 text-xs text-ink/45">{missedCount} absences recorded</p>
                   </div>
                   <div className="rounded-lg border border-line bg-white p-3">
                     <p className="text-xs font-semibold uppercase text-ink/40">Tuition due</p>
-                    <p className="mt-2 text-xl font-bold text-ink">${selected.amountDue}</p>
+                    <p className="mt-2 text-xl font-bold text-ink">{usd.format(selected.amountDue)}</p>
                     <p className="mt-1 text-xs text-ink/45">{selected.tuitionStatus}</p>
                   </div>
                 </section>
@@ -328,25 +342,78 @@ export function StudentsPage() {
                 <section className="rounded-lg border border-line bg-white">
                   <div className="border-b border-line px-3 py-3">
                     <p className="text-sm font-bold text-ink">Attendance history</p>
-                    <p className="mt-0.5 text-xs text-ink/45">Toggle class attendance records.</p>
+                    <p className="mt-0.5 text-xs text-ink/45">Green present, amber late, red absent, grey no record. Click a day to correct it.</p>
                   </div>
                   <div className="grid grid-cols-4 gap-2 p-3">
-                    {selectedAttendance.map((record) => (
-                      <button
-                        key={record.date}
-                        type="button"
-                        onClick={() => void updateAttendanceRecord(selected.id, record.date, !record.present)}
-                        className={`rounded-lg border px-2 py-2 text-center text-xs font-semibold ${
-                          record.present ? "border-green-800 bg-green-900 text-white" : "border-red-200 bg-red-50 text-red-600"
-                        }`}
-                        aria-label={`${record.present ? "Mark absent" : "Mark present"} ${selected.name} on ${record.date}`}
-                      >
-                        <CheckSquare className="mx-auto mb-1" size={14} />
-                        {dateLabel(record.date)}
-                      </button>
-                    ))}
+                    {selectedAttendance.map((record) => {
+                      const next: AttendanceStatus = record.status && record.status !== "absent" ? "absent" : "present";
+                      return (
+                        <button
+                          key={record.date}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void run(() => updateAttendanceRecord(selected.id, record.date, next), `${selected.name} marked ${next} on ${record.date}.`)}
+                          className={`rounded-lg border px-2 py-2 text-center text-xs font-semibold disabled:opacity-60 ${
+                            record.status === "present" ? "border-green-800 bg-green-900 text-white"
+                              : record.status === "late" ? "border-amber-300 bg-amber-100 text-amber-900"
+                              : record.status === "absent" ? "border-red-200 bg-red-50 text-red-600"
+                              : "border-line bg-white text-ink/35"
+                          }`}
+                          aria-label={`Mark ${selected.name} ${next} on ${record.date} (currently ${record.status ?? "no record"})`}
+                        >
+                          <CheckSquare className="mx-auto mb-1" size={14} />
+                          {dateLabel(record.date)}
+                        </button>
+                      );
+                    })}
                   </div>
                 </section>
+
+                <section className="rounded-lg border border-line bg-white p-3">
+                  <p className="text-sm font-bold text-ink">Enrollment</p>
+                  <p className="mt-0.5 text-xs text-ink/45">
+                    {selected.enrollmentStatus === "terminated"
+                      ? "This student is terminated: the seat is free and no new monthly invoices are issued. Existing balances stay on record."
+                      : "Ending enrollment frees the group seat and stops new monthly invoices. Attendance and payment history are kept."}
+                  </p>
+                  {selected.enrollmentStatus === "terminated" ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void run(() => updateStudent(selected.id, { enrollmentStatus: "active", terminationNote: "" }), `${selected.name} is active again.`)}
+                      className="mt-3 rounded-lg bg-green-900 px-3 py-2 text-xs font-semibold text-cream disabled:opacity-60"
+                    >
+                      Reactivate enrollment
+                    </button>
+                  ) : (
+                    <form
+                      className="mt-3 flex flex-wrap gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (!window.confirm(`End enrollment for ${selected.name}?`)) return;
+                        void run(async () => {
+                          await updateStudent(selected.id, { enrollmentStatus: "terminated", terminationNote: enrollmentNote.trim() });
+                          setEnrollmentNote("");
+                        }, `${selected.name}'s enrollment was ended.`);
+                      }}
+                    >
+                      <input
+                        aria-label="Reason for ending enrollment"
+                        required
+                        minLength={3}
+                        maxLength={1000}
+                        value={enrollmentNote}
+                        onChange={(event) => setEnrollmentNote(event.target.value)}
+                        placeholder="Reason (moved, withdrew…)"
+                        className="min-w-40 flex-1 rounded-lg border border-line px-3 py-2 text-xs outline-none focus:border-gold-500"
+                      />
+                      <button disabled={busy} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">
+                        End enrollment
+                      </button>
+                    </form>
+                  )}
+                </section>
+                {notice && <p role="status" className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900">{notice}</p>}
 
                 {(selected.financeNote || selected.terminationNote) && (
                   <section className="rounded-lg border border-amber-200 bg-amber-50 p-3">

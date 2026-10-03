@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import csv
+import hashlib
+import hmac
 import io
+import json
+import logging
 import os
+import threading
+import time
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from . import finance, telegram
+from .clock import academy_today, utc_now_iso
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
     ApplicationCreate, StaffEdit, StaffPasswordReset, GroupWrite, PlacementWrite,
@@ -23,11 +30,13 @@ from .schemas import (
     StatusPatch,
     StudentPatch,
     TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid, TelegramReminder,
+    ClassSessionWrite, InvoiceVoid, InvoiceAdjust, ScheduleWrite,
 )
 from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env, provision_teacher_groups
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
+logger = logging.getLogger("aba.api")
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -172,7 +181,9 @@ def meeting_row(row):
 
 def attendance_row(row):
     data = dict(row)
-    record = {"studentId": data["student_id"], "date": data["date"], "present": bool(data["present"])}
+    present = bool(data["present"])
+    record = {"studentId": data["student_id"], "date": data["date"], "present": present,
+              "status": data.get("status") or ("present" if present else "absent")}
     if data.get("note"):
         record["note"] = data["note"]
     return record
@@ -201,14 +212,14 @@ def assessment_row(row):
 
 
 def recalculate_attendance_summary(conn, student_id: str) -> None:
-    rows = conn.execute("SELECT present FROM attendance_records WHERE student_id = ? ORDER BY date", (student_id,)).fetchall()
+    rows = conn.execute("SELECT present, status FROM attendance_records WHERE student_id = ? ORDER BY date", (student_id,)).fetchall()
     if not rows:
         attendance_pct = 0
         attendance = "absent"
     else:
         present_count = sum(1 for row in rows if row["present"])
         attendance_pct = round((present_count / len(rows)) * 100)
-        attendance = "present" if rows[-1]["present"] else "absent"
+        attendance = rows[-1]["status"] or ("present" if rows[-1]["present"] else "absent")
     conn.execute(
         "UPDATE students SET attendance_pct = ?, attendance = ? WHERE id = ?",
         (attendance_pct, attendance, student_id),
@@ -244,7 +255,7 @@ def enroll_accepted_application(conn, application) -> None:
             application["klass"],
             application["teacher"],
             next_rank,
-            date.today().isoformat(),
+            academy_today().isoformat(),
         ),
     )
 
@@ -301,9 +312,44 @@ def teacher_alias(user: dict) -> str:
     return STAFF_ACCOUNTS[user["email"].lower()][0]
 
 
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_LIMITS = (("pair", 8), ("email", 40))
+_login_failures: dict[str, list[float]] = {}
+_login_lock = threading.Lock()
+
+
+def _login_keys(email: str, request: Request) -> dict[str, str]:
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    ip = forwarded or (request.client.host if request.client else "unknown")
+    return {"pair": f"pair:{email}:{ip}", "email": f"email:{email}"}
+
+
+def check_login_allowed(keys: dict[str, str]) -> None:
+    cutoff = time.monotonic() - LOGIN_WINDOW_SECONDS
+    with _login_lock:
+        for kind, limit in LOGIN_LIMITS:
+            recent = [stamp for stamp in _login_failures.get(keys[kind], []) if stamp > cutoff]
+            if len(recent) >= limit:
+                raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Wait 15 minutes and try again.")
+
+
+def record_login_failure(keys: dict[str, str]) -> None:
+    now = time.monotonic()
+    cutoff = now - LOGIN_WINDOW_SECONDS
+    with _login_lock:
+        if len(_login_failures) > 5000:
+            for key in [key for key, stamps in _login_failures.items() if not stamps or stamps[-1] <= cutoff]:
+                del _login_failures[key]
+        for key in keys.values():
+            _login_failures[key] = [stamp for stamp in _login_failures.get(key, []) if stamp > cutoff] + [now]
+
+
 @app.post("/api/auth/login")
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, request: Request):
+    keys = _login_keys(str(payload.email).lower(), request)
+    check_login_allowed(keys)
     if str(payload.email).lower() not in STAFF_ACCOUNTS:
+        record_login_failure(keys)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     with connect() as conn:
         row = conn.execute(
@@ -316,12 +362,15 @@ def login(payload: LoginRequest):
             (payload.email,),
         ).fetchone()
         if not row or not verify_password(payload.password, row["password_hash"], row["password_salt"]):
+            record_login_failure(keys)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if row["status"] != "active":
             raise HTTPException(status_code=403, detail="Account is inactive")
         user = auth_user_row(row)
         token = create_token({"sub": user["id"], "email": user["email"], "role": user["role"], "name": user["name"], "version": row["token_version"]})
-        conn.execute("UPDATE staff_users SET last_active = ? WHERE id = ?", ("Just now", user["id"]))
+        conn.execute("UPDATE staff_users SET last_active = ? WHERE id = ?", (utc_now_iso(), user["id"]))
+    with _login_lock:
+        _login_failures.pop(keys["pair"], None)
     audit("auth.login", {"userId": user["id"], "role": user["role"]})
     return {"token": token, "user": user}
 
@@ -357,19 +406,38 @@ def logout(user=Depends(get_current_user)):
     return {"ok": True}
 
 
-@app.get("/api/bootstrap")
-def bootstrap(user=Depends(get_ready_user)):
+_invoice_sync = {"day": ""}
+
+
+def sync_due_invoices() -> None:
+    """Issue scheduled invoices once per academy day instead of locking every student on each page load."""
+    today = academy_today().isoformat()
+    if _invoice_sync["day"] == today:
+        return
     with connect() as conn:
         if not conn.postgres:
             conn.execute("BEGIN IMMEDIATE")
-        query = "SELECT s.* FROM students s JOIN billing_plans b ON b.student_id=s.id WHERE b.active=1 AND s.enrollment_status='active'"
-        params = ()
-        if user["role"] == "Teacher":
-            query += " AND s.teacher=?"
-            params = (teacher_alias(user),)
-        query += " ORDER BY s.id" + (" FOR UPDATE OF s" if conn.postgres else "")
-        for student in conn.execute(query, params).fetchall():
+        query = ("SELECT s.* FROM students s JOIN billing_plans b ON b.student_id=s.id "
+                 "WHERE b.active=1 AND s.enrollment_status='active' ORDER BY s.id" + (" FOR UPDATE OF s" if conn.postgres else ""))
+        for student in conn.execute(query).fetchall():
             finance.sync_plan(conn, student)
+    _invoice_sync["day"] = today
+
+
+def read_schedule(conn) -> list[dict]:
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", ("weekly_schedule",)).fetchone()
+    if not row:
+        return []
+    try:
+        blocks = json.loads(row["value"])
+    except ValueError:
+        return []
+    return blocks if isinstance(blocks, list) else []
+
+
+@app.get("/api/bootstrap")
+def bootstrap(user=Depends(get_ready_user)):
+    sync_due_invoices()
     with connect() as conn:
         if conn.postgres:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -393,14 +461,11 @@ def bootstrap(user=Depends(get_ready_user)):
                 for row in conn.execute("SELECT * FROM applications ORDER BY submitted DESC, id DESC").fetchall()
             ]
             groups = [group_row(row) for row in conn.execute("SELECT * FROM class_groups ORDER BY name").fetchall()]
-        applications = [
-            app
-            for app in applications
-        ]
         users = [staff_row(row) for row in conn.execute("SELECT * FROM staff_users ORDER BY name").fetchall() if row["email"].lower() in STAFF_ACCOUNTS]
+        if user["role"] in {"Teacher", "Finance"}:
+            users = [staff for staff in users if staff["id"] == user["id"]]
         meetings = [meeting_row(row) for row in conn.execute("SELECT * FROM meetings ORDER BY day, time").fetchall()]
         if user["role"] == "Teacher":
-            users = [staff for staff in users if staff["id"] == user["id"]]
             application_ids = {application["id"] for application in applications}
             meetings = [meeting for meeting in meetings if meeting["applicantId"] in application_ids]
         student_ids = {student["id"] for student in students}
@@ -427,18 +492,27 @@ def bootstrap(user=Depends(get_ready_user)):
                                                  amount=i["paid"], balance=i["balance"], dueDate=i["dueDate"]) for i in ledger["invoices"]]
         for group in groups:
             group["enrolled"] = sum(1 for student in students if student["klass"] == group["name"] and student["enrollmentStatus"] == "active")
+        schedule = read_schedule(conn)
+        if user["role"] == "Teacher":
+            # Teachers see whether a family is in good standing, never the ledger itself.
+            ledger = {"invoices": [], "payments": [], "billingPlans": []}
+            tuition_records = []
+            alias = teacher_alias(user)
+            schedule = [block for block in schedule if block.get("teacher") == alias]
     return {
         "students": students,
         "applications": applications,
         "classGroups": groups,
         "staffUsers": users,
         "meetings": meetings,
-        "attendanceDates": sorted({record["date"] for record in attendance_records} | {date.today().isoformat()}),
+        "attendanceDates": sorted({record["date"] for record in attendance_records} | {academy_today().isoformat()}),
         "attendanceRecords": attendance_records,
         "tuitionMonths": sorted({record["month"] for record in tuition_records}),
         **ledger,
         "tuitionRecords": tuition_records,
         "assessmentRecords": assessment_records,
+        "weeklySchedule": schedule,
+        "today": academy_today().isoformat(),
     }
 
 
@@ -463,15 +537,25 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
     if not updates:
         raise HTTPException(status_code=400, detail="No updates supplied")
     with connect() as conn:
-        exists = conn.execute("SELECT id, teacher FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        exists = conn.execute("SELECT id, teacher, klass, enrollment_status FROM students WHERE id = ?" + (" FOR UPDATE" if conn.postgres else ""), (student_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Student not found")
         if user["role"] == "Teacher" and exists["teacher"] != teacher_alias(user):
             raise HTTPException(status_code=403, detail="Teachers can update only their own students")
+        reactivating = updates.get("enrollmentStatus") == "active" and exists["enrollment_status"] != "active"
+        if reactivating:
+            group = conn.execute("SELECT capacity FROM class_groups WHERE name = ?", (exists["klass"],)).fetchone()
+            count = conn.execute("SELECT COUNT(*) AS n FROM students WHERE klass = ? AND enrollment_status = 'active'", (exists["klass"],)).fetchone()["n"]
+            if group and count >= group["capacity"]:
+                raise HTTPException(409, "This student's group is full. Move the student to another group or increase capacity first.")
         assignments = ", ".join(f"{allowed[key]} = ?" for key in updates)
         values = [updates[key] for key in updates]
         conn.execute(f"UPDATE students SET {assignments} WHERE id = ?", (*values, student_id))
         row = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if reactivating:
+            finance.sync_plan(conn, row)
         _, balances = finance.snapshot(conn, [student_id])
         result = {**student_row(row), **balances[student_id]}
     audit("student.updated", {"studentId": student_id, "updates": updates, "actorId": user["id"]})
@@ -480,6 +564,7 @@ def update_student(student_id: str, patch: StudentPatch, user=Depends(require_ro
 
 @app.put("/api/attendance")
 def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(require_roles("IT Admin", "Teacher"))):
+    validate_session_date(payload.date)
     with connect() as conn:
         exists = conn.execute("SELECT id, teacher FROM students WHERE id = ?", (payload.studentId,)).fetchone()
         if not exists:
@@ -488,14 +573,70 @@ def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(requir
             raise HTTPException(status_code=403, detail="Teachers can update only their own students")
         conn.execute(
             """
-            INSERT INTO attendance_records (student_id, date, present)
-            VALUES (?, ?, ?)
-            ON CONFLICT(student_id, date) DO UPDATE SET present = excluded.present
+            INSERT INTO attendance_records (student_id, date, present, status)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(student_id, date) DO UPDATE SET present = excluded.present, status = excluded.status
             """,
-            (payload.studentId, payload.date, 1 if payload.present else 0),
+            (payload.studentId, payload.date, 1 if payload.present else 0, payload.status),
         )
         recalculate_attendance_summary(conn, payload.studentId)
-    audit("attendance.updated", {"actorId": user["id"], "studentId": payload.studentId, "date": payload.date, "present": payload.present})
+        finance.audit_in_transaction(conn, "attendance.updated", {"actorId": user["id"], "studentId": payload.studentId, "date": payload.date, "status": payload.status})
+    return {"ok": True}
+
+
+def validate_session_date(value: str) -> None:
+    try:
+        day = date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(422, "Enter a valid class date") from exc
+    if day > academy_today() + timedelta(days=1):
+        raise HTTPException(422, "Class date cannot be in the future")
+
+
+@app.post("/api/class-session")
+def save_class_session(payload: ClassSessionWrite, user=Depends(require_roles("IT Admin", "Teacher"))):
+    """Save one class day for a whole group atomically: every student is stored or none are."""
+    validate_session_date(payload.date)
+    ids = [entry.studentId for entry in payload.entries]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "A student appears twice in this class session")
+    with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        placeholders = ", ".join("?" for _ in ids)
+        owners = {row["id"]: row["teacher"] for row in conn.execute(f"SELECT id, teacher FROM students WHERE id IN ({placeholders})", ids).fetchall()}
+        if len(owners) != len(ids):
+            raise HTTPException(status_code=404, detail="Student not found")
+        if user["role"] == "Teacher" and any(teacher != teacher_alias(user) for teacher in owners.values()):
+            raise HTTPException(status_code=403, detail="Teachers can update only their own students")
+        for entry in payload.entries:
+            conn.execute("UPDATE students SET stars = ?, hw = ?, next_hw = ? WHERE id = ?", (entry.stars, entry.hw, entry.nextHw, entry.studentId))
+            conn.execute(
+                """
+                INSERT INTO attendance_records (student_id, date, present, status)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(student_id, date) DO UPDATE SET present = excluded.present, status = excluded.status
+                """,
+                (entry.studentId, payload.date, 0 if entry.attendance == "absent" else 1, entry.attendance),
+            )
+            recalculate_attendance_summary(conn, entry.studentId)
+        finance.audit_in_transaction(conn, "class_session.saved", {"actorId": user["id"], "date": payload.date, "students": len(ids)})
+    return {"ok": True, "saved": len(ids)}
+
+
+@app.put("/api/schedule")
+def save_schedule(payload: ScheduleWrite, user=Depends(require_roles("IT Admin", "Registration"))):
+    blocks = [block.model_dump() for block in payload.blocks]
+    if len({block["id"] for block in blocks}) != len(blocks):
+        raise HTTPException(422, "Schedule blocks must have unique ids")
+    for index, block in enumerate(blocks):
+        for other in blocks[index + 1:]:
+            if block["teacher"] == other["teacher"] and block["day"] == other["day"] and block["start"] < other["end"] and other["start"] < block["end"]:
+                raise HTTPException(409, f"{block['teacher']} has overlapping classes on {block['day']}. Fix the conflict before saving.")
+    with connect() as conn:
+        conn.execute("INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                     ("weekly_schedule", json.dumps(blocks)))
+        finance.audit_in_transaction(conn, "schedule.saved", {"actorId": user["id"], "blocks": len(blocks)})
     return {"ok": True}
 
 
@@ -543,7 +684,7 @@ def update_assessment_record(payload: AssessmentRecordPatch, user=Depends(requir
 @app.post("/api/applications", status_code=201)
 def create_application(payload: ApplicationCreate, user=Depends(require_roles("IT Admin", "Registration"))):
     app_id = f"a-{uuid4().hex[:10]}"
-    submitted = date.today().isoformat()
+    submitted = academy_today().isoformat()
     with connect() as conn:
         if not conn.postgres:
             conn.execute("BEGIN IMMEDIATE")
@@ -692,24 +833,19 @@ def send_telegram_reminder(payload: TelegramReminder, user=Depends(require_roles
 
 
 @app.post("/api/telegram/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request):
-    if not telegram.WEBHOOK_SECRET or secret != telegram.WEBHOOK_SECRET:
+def telegram_webhook(secret: str, update: dict = Body(default_factory=dict),
+                     x_telegram_bot_api_secret_token: str | None = Header(default=None)):
+    # Declared sync so FastAPI runs the database and Telegram calls in a worker thread, not on the event loop.
+    if not telegram.WEBHOOK_SECRET or not hmac.compare_digest(secret, telegram.WEBHOOK_SECRET):
         raise HTTPException(404, "Not found")
-    telegram.accept_update(await request.json())
+    if x_telegram_bot_api_secret_token is not None and not hmac.compare_digest(x_telegram_bot_api_secret_token, telegram.header_secret()):
+        raise HTTPException(404, "Not found")
+    try:
+        telegram.accept_update(update)
+    except Exception:
+        # Returning an error makes Telegram redeliver the same update indefinitely.
+        logger.exception("Telegram update could not be processed")
     return {"ok": True}
-
-
-@app.post("/api/actions/reminder")
-def queue_reminder(payload: TelegramReminder, user=Depends(require_roles("IT Admin", "Finance"))):
-    result = telegram.send_balance_reminder(payload.studentId, payload.invoiceId)
-    audit("telegram.reminder_sent", {"studentId": payload.studentId, "invoiceId": payload.invoiceId, "actorId": user["id"], "amount": result["amount"]})
-    return result
-
-
-@app.post("/api/actions/export")
-def prepare_export(payload: dict, user=Depends(require_roles("IT Admin", "Finance"))):
-    audit("export.prepared", {**payload, "actorId": user["id"]})
-    return {"ready": True}
 
 
 def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingResponse:
@@ -738,7 +874,7 @@ def finance_export(user=Depends(require_roles("IT Admin", "Finance"))):
                  phone=people[i["studentId"]]["parentPhone"], period=i["period"], due_date=i["dueDate"],
                  billed_usd=i["amount"], received_usd=i["paid"], balance_usd=i["balance"], status=i["status"])
             for i in data["invoices"]]
-    return csv_response(f"aba-tuition-report-{date.today().isoformat()}.csv", rows)
+    return csv_response(f"aba-tuition-report-{academy_today().isoformat()}.csv", rows)
 
 
 @app.get("/api/finance/receipts")
@@ -748,7 +884,7 @@ def finance_receipts(user=Depends(require_roles("IT Admin", "Finance"))):
                  period=p["period"], amount_usd=p["amount"], method=p["method"], paid_on=p["paidOn"],
                  reference=p["reference"], status="void" if p["voidedAt"] else "received", void_reason=p["voidReason"] or "")
             for p in data["payments"]]
-    return csv_response(f"aba-receipts-{date.today().isoformat()}.csv", rows)
+    return csv_response(f"aba-receipts-{academy_today().isoformat()}.csv", rows)
 
 
 @app.post("/api/finance/reconcile")
@@ -767,16 +903,72 @@ def create_invoice(payload: InvoiceCreate, user=Depends(require_roles("IT Admin"
         previous = finance.replay(conn, payload)
         if previous:
             return previous
-        existing = conn.execute("SELECT id FROM invoices WHERE student_id = ? AND period = ?", (payload.studentId, payload.period)).fetchone()
-        if existing:
+        existing = conn.execute("SELECT id, voided_at FROM invoices WHERE student_id = ? AND period = ?", (payload.studentId, payload.period)).fetchone()
+        if existing and not existing["voided_at"]:
             raise HTTPException(409, "An invoice already exists for this student and month. Use the existing invoice.")
-        invoice_id = str(uuid4())
-        conn.execute("INSERT INTO invoices VALUES (?, ?, ?, ?, ?, ?)",
-                     (invoice_id, payload.studentId, payload.period, int(payload.amount * 100), payload.dueDate.isoformat(), finance.now()))
+        if existing:
+            # Re-issuing a voided month restores that invoice so receipts keep one invoice per period.
+            invoice_id = existing["id"]
+            conn.execute("UPDATE invoices SET amount_cents = ?, due_date = ?, voided_at = NULL, void_reason = NULL WHERE id = ?",
+                         (int(payload.amount * 100), payload.dueDate.isoformat(), invoice_id))
+        else:
+            invoice_id = str(uuid4())
+            conn.execute("INSERT INTO invoices(id, student_id, period, amount_cents, due_date, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                         (invoice_id, payload.studentId, payload.period, int(payload.amount * 100), payload.dueDate.isoformat(), finance.now()))
         result = {"id": invoice_id}
         finance.audit_in_transaction(conn, "invoice.created", {"actorId": user["id"], "invoiceId": invoice_id})
         finance.remember(conn, payload, result)
     return result
+
+
+def locked_invoice(conn, invoice_id: str):
+    invoice = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    paid = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE invoice_id = ? AND voided_at IS NULL", (invoice_id,)).fetchone()["total"]
+    return invoice, paid
+
+
+def invoice_student(invoice_id: str) -> str:
+    with connect() as conn:
+        row = conn.execute("SELECT student_id FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Invoice not found")
+    return row["student_id"]
+
+
+@app.post("/api/finance/invoices/{invoice_id}/void")
+def void_invoice(invoice_id: str, payload: InvoiceVoid, user=Depends(require_roles("IT Admin", "Finance"))):
+    student_id = invoice_student(invoice_id)
+    with connect() as conn:
+        finance.transaction_lock(conn, student_id)
+        invoice, paid = locked_invoice(conn, invoice_id)
+        if invoice["voided_at"]:
+            return {"ok": True}
+        if paid:
+            raise HTTPException(409, "This invoice has recorded payments. Void those payments first, then void the invoice.")
+        conn.execute("UPDATE invoices SET voided_at = ?, void_reason = ? WHERE id = ?", (finance.now(), payload.reason, invoice_id))
+        finance.audit_in_transaction(conn, "invoice.voided", {"actorId": user["id"], "invoiceId": invoice_id, "reason": payload.reason})
+    return {"ok": True}
+
+
+@app.patch("/api/finance/invoices/{invoice_id}")
+def adjust_invoice(invoice_id: str, payload: InvoiceAdjust, user=Depends(require_roles("IT Admin", "Finance"))):
+    student_id = invoice_student(invoice_id)
+    cents = int(payload.amount * 100)
+    with connect() as conn:
+        finance.transaction_lock(conn, student_id)
+        invoice, paid = locked_invoice(conn, invoice_id)
+        if invoice["voided_at"]:
+            raise HTTPException(409, "This invoice is void. Create the invoice again to restore it.")
+        if cents < paid:
+            raise HTTPException(409, "The new amount is lower than what was already received for this invoice.")
+        due = payload.dueDate.isoformat() if payload.dueDate else invoice["due_date"]
+        conn.execute("UPDATE invoices SET amount_cents = ?, due_date = ? WHERE id = ?", (cents, due, invoice_id))
+        finance.audit_in_transaction(conn, "invoice.adjusted", {
+            "actorId": user["id"], "invoiceId": invoice_id, "fromCents": invoice["amount_cents"], "toCents": cents,
+            "dueDate": due, "reason": payload.reason.strip()})
+    return {"ok": True}
 
 
 @app.put("/api/finance/billing-plan")
@@ -802,6 +994,8 @@ def record_payment(payload: PaymentCreate, user=Depends(require_roles("IT Admin"
         invoice = conn.execute("SELECT * FROM invoices WHERE id = ? AND student_id = ?", (payload.invoiceId, payload.studentId)).fetchone()
         if not invoice:
             raise HTTPException(404, "Invoice not found for this student")
+        if invoice["voided_at"]:
+            raise HTTPException(409, "This invoice is void and cannot receive payments.")
         paid = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE invoice_id = ? AND voided_at IS NULL", (payload.invoiceId,)).fetchone()["total"]
         cents = int(payload.amount * 100)
         if cents > invoice["amount_cents"] - paid:

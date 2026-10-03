@@ -32,6 +32,11 @@ const assessmentMonths: Record<QuarterKey, string[]> = {
   Final: ["April", "May", "June"],
 };
 
+function currentQuarter(): QuarterKey {
+  const month = new Date().toLocaleString("en-US", { month: "long" });
+  return (Object.keys(assessmentMonths) as QuarterKey[]).find((key) => assessmentMonths[key].includes(month)) ?? "Q1";
+}
+
 function assessmentAverage(record: Omit<AssessmentRecord, "studentId" | "quarter" | "note">) {
   return Math.round((record.islamicStudies + record.quranReading + record.tajweed + record.memorization + record.practical) / 5);
 }
@@ -41,8 +46,8 @@ export function AssessmentsPage() {
   const teacherName = user?.teacherAlias ?? "";
   const teacherStudents = students.filter((student) => student.teacher === teacherName);
   const teacherGroups = classGroups.filter((group) => group.teacher === teacherName);
-  const [quarter, setQuarter] = useState<QuarterKey>("Q1");
-  const [monthFilter, setMonthFilter] = useState("November");
+  const [quarter, setQuarter] = useState<QuarterKey>(currentQuarter);
+  const [monthFilter, setMonthFilter] = useState(() => assessmentMonths[currentQuarter()].at(-1) ?? "");
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [statusFilter, setStatusFilter] = useState<AssessmentStatusFilter>("all");
   const [query, setQuery] = useState("");
@@ -95,8 +100,10 @@ export function AssessmentsPage() {
     }
     const current = recordsByStudent.get(studentId) ?? { studentId, quarter, ...emptyScores };
     const next = { ...current, ...patch, quarter };
-    void updateAssessmentRecord(next);
-    setNotice(`${quarter} assessment saved.`);
+    setNotice("Saving…");
+    updateAssessmentRecord(next)
+      .then(() => setNotice(`${quarter} assessment saved.`))
+      .catch((error) => setNotice(`Not saved: ${error instanceof Error ? error.message : "connection error"} The last change was undone; please enter it again.`));
   };
 
   const saveScoreValue = (

@@ -32,8 +32,9 @@ export function FinanceOverview() {
   };
   const connect = (studentId: string) => run(`link:${studentId}`, async () => {
     const url = await createTelegramLink(studentId);
-    await navigator.clipboard.writeText(url);
-  }, "Telegram connection link copied. Send it to the parent; the link is valid for 7 days.");
+    try { await navigator.clipboard.writeText(url); }
+    catch { window.prompt("Copy this Telegram connection link and send it to the parent (valid for 7 days):", url); }
+  }, "Telegram connection link ready. Send it to the parent; the link is valid for 7 days.");
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -61,7 +62,7 @@ export function FinanceOverview() {
             <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold">{student.name}</span><span className="ml-2 text-xs text-ink/45">{student.parentName} · {student.parentPhone}</span></td>
             <td className="whitespace-nowrap px-4 py-3">{student.klass}<span className="ml-1 text-xs text-ink/45">· {student.teacher}</span></td>
             <td className="whitespace-nowrap px-4 py-3">{invoice.period}<span className="ml-1 text-xs text-ink/45">· due {invoice.dueDate}</span></td>
-            <td className="px-4 py-3 tabular-nums">{usd.format(invoice.amount)}</td><td className="px-4 py-3 tabular-nums text-emerald-700">{usd.format(invoice.paid)}</td>
+            <td className={`px-4 py-3 tabular-nums ${invoice.voided ? "text-ink/40 line-through" : ""}`}>{usd.format(invoice.amount)}</td><td className="px-4 py-3 tabular-nums text-emerald-700">{usd.format(invoice.paid)}</td>
             <td className={`px-4 py-3 font-semibold tabular-nums ${invoice.overdue ? "text-red-700" : ""}`}>{usd.format(invoice.balance)}<span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-ink/55">{invoice.overdue ? "Overdue" : invoice.status}</span></td>
             <td className="whitespace-nowrap px-4 py-3">{student.telegramConnected ? <button disabled={Boolean(busyId) || invoice.balance <= 0} onClick={() => void run(`send:${invoice.id}`, () => sendTelegramReminder(student.id, invoice.id), `Reminder sent to ${student.parentName}.`)} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><Send size={14} />{busyId === `send:${invoice.id}` ? "Sending…" : "Send reminder"}</button> : <button disabled={Boolean(busyId)} onClick={() => void connect(student.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 disabled:opacity-40"><MessageCircle size={14} />{busyId === `link:${student.id}` ? "Creating…" : "Connect parent"}</button>}</td>
           </tr>; })}</tbody>

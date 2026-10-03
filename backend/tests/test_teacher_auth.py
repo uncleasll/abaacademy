@@ -30,7 +30,7 @@ class TeacherAuthTest(unittest.TestCase):
             sock.bind(('127.0.0.1', 0))
             cls.port = sock.getsockname()[1]
         cls.env = {**os.environ, 'DATABASE_URL': '', 'DATABASE_PATH': cls.temp.name + '/test.db',
-                   'APP_ENV': 'development', 'SEED_DEMO_DATA': 'false',
+                   'APP_ENV': 'development', 'SEED_DEMO_DATA': 'false', 'ACADEMY_TIMEZONE': 'local',
                    'TEACHER_ACCOUNTS_JSON': json.dumps(accounts)}
         subprocess.run([sys.executable, '-c', "from app.database import init_db; init_db()"], cwd=BACKEND, env=cls.env, check=True)
         with sqlite3.connect(cls.env['DATABASE_PATH']) as conn:

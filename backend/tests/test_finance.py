@@ -76,7 +76,9 @@ class FinanceTest(unittest.TestCase):
         data = self.call('/api/bootstrap', token=tokens['firuz'])[1]
         self.assertEqual(data['students'][0]['amountDue'], 0)
         self.assertEqual(data['students'][0]['tuitionStatus'], 'paid')
-        self.assertEqual(data['invoices'][0]['paid'], 450.25)
+        # Teachers see standing only; the ledger itself stays with finance.
+        self.assertEqual((data['invoices'], data['payments'], data['billingPlans'], data['tuitionRecords']), ([], [], [], []))
+        self.assertEqual(self.call('/api/bootstrap', token=finance)[1]['invoices'][0]['paid'], 450.25)
         # Financial audit failure rolls back the payment itself.
         self.call('/api/finance/payments/' + payment_id + '/void', dict(reason='Correction for test'), finance)
         with sqlite3.connect(self.env['DATABASE_PATH']) as conn:

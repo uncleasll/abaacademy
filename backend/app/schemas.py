@@ -7,6 +7,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+from .clock import academy_today
+
+AttendanceValue = Literal['present', 'late', 'absent']
+HomeworkValue = Literal['done', 'partial', 'not_done']
+ISO_DATE = r'^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'
+
 
 class Student(BaseModel):
     id: str
@@ -36,15 +42,15 @@ class Student(BaseModel):
 
 
 class StudentPatch(BaseModel):
-    attendance: str | None = None
+    attendance: AttendanceValue | None = None
     stars: int | None = Field(default=None, ge=0, le=5)
-    hw: str | None = None
-    nextHw: str | None = None
+    hw: HomeworkValue | None = None
+    nextHw: str | None = Field(default=None, max_length=500)
     tuitionStatus: str | None = None
     amountDue: int | None = Field(default=None, ge=0)
-    enrollmentStatus: str | None = None
-    financeNote: str | None = None
-    terminationNote: str | None = None
+    enrollmentStatus: Literal['active', 'paused', 'terminated'] | None = None
+    financeNote: str | None = Field(default=None, max_length=1000)
+    terminationNote: str | None = Field(default=None, max_length=1000)
 
 
 class Application(BaseModel):
@@ -155,9 +161,32 @@ class MeetingCreate(BaseModel):
 
 class AttendanceRecordPatch(BaseModel):
     studentId: str
-    date: str
-    present: bool
+    date: str = Field(pattern=ISO_DATE)
+    present: bool | None = None
+    status: AttendanceValue | None = None
     note: str = ""
+
+    @model_validator(mode='after')
+    def resolve_status(self):
+        if self.status is None and self.present is None:
+            raise ValueError('Provide an attendance status')
+        if self.status is None:
+            self.status = 'present' if self.present else 'absent'
+        self.present = self.status != 'absent'
+        return self
+
+
+class ClassSessionEntry(BaseModel):
+    studentId: str
+    attendance: AttendanceValue
+    stars: int = Field(ge=0, le=5)
+    hw: HomeworkValue
+    nextHw: str = Field(default='', max_length=500)
+
+
+class ClassSessionWrite(BaseModel):
+    date: str = Field(pattern=ISO_DATE)
+    entries: list[ClassSessionEntry] = Field(min_length=1, max_length=300)
 
 
 class TuitionRecordPatch(BaseModel):
@@ -169,13 +198,13 @@ class TuitionRecordPatch(BaseModel):
 
 class AssessmentRecordPatch(BaseModel):
     studentId: str
-    quarter: str
+    quarter: Literal['Q1', 'Q2', 'Q3', 'Final']
     islamicStudies: int = Field(ge=0, le=100)
     quranReading: int = Field(ge=0, le=100)
     tajweed: int = Field(ge=0, le=100)
     memorization: int = Field(ge=0, le=100)
     practical: int = Field(ge=0, le=100)
-    note: str = ""
+    note: str = Field(default="", max_length=1000)
 
 
 class PaymentCreate(BaseModel):
@@ -190,7 +219,7 @@ class PaymentCreate(BaseModel):
 
     @model_validator(mode='after')
     def validate_date(self):
-        if self.paidOn > date.today():
+        if self.paidOn > academy_today():
             raise ValueError('Payment date cannot be in the future')
         return self
 
@@ -228,6 +257,36 @@ class PaymentVoid(BaseModel):
         if len(self.reason) < 5:
             raise ValueError('Enter a reason of at least five characters')
         return self
+
+
+class InvoiceVoid(PaymentVoid):
+    pass
+
+
+class InvoiceAdjust(BaseModel):
+    amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
+    dueDate: date | None = None
+    reason: str = Field(min_length=5, max_length=1000)
+
+
+class ScheduleBlock(BaseModel):
+    id: str = Field(min_length=1, max_length=60)
+    group: str = Field(min_length=1, max_length=100)
+    teacher: str = Field(min_length=1, max_length=100)
+    day: Literal['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    start: str = Field(pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
+    end: str = Field(pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
+    color: str = Field(default='', max_length=120)
+
+    @model_validator(mode='after')
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError('End time must be after start time')
+        return self
+
+
+class ScheduleWrite(BaseModel):
+    blocks: list[ScheduleBlock] = Field(max_length=200)
 
 
 class TelegramReminder(BaseModel):

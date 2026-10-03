@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -35,13 +36,53 @@ class DatabaseConnection:
         return self.raw.executemany(sql, params)
 
 
+# Opt-in: set DB_POOL_MAX (for example 5) after verifying it against the production database.
+POOL_MAX = int(os.getenv("DB_POOL_MAX", "0") or 0)
+_pool: Any = None
+_pool_lock = threading.Lock()
+
+
+def _postgres_kwargs() -> dict[str, Any]:
+    from psycopg.rows import dict_row
+
+    return {"row_factory": dict_row, "connect_timeout": 10, "prepare_threshold": None}
+
+
+def _get_pool() -> Any:
+    """Reuse PostgreSQL connections: a new TLS handshake per request is the slowest part of most calls."""
+    global _pool
+    if _pool is None and POOL_MAX > 0:
+        with _pool_lock:
+            if _pool is None:
+                try:
+                    from psycopg_pool import ConnectionPool
+                except ImportError:
+                    return None
+                _pool = ConnectionPool(
+                    DATABASE_URL, min_size=1, max_size=POOL_MAX, kwargs=_postgres_kwargs(),
+                    check=ConnectionPool.check_connection, max_idle=300, max_lifetime=1800, timeout=20, open=True,
+                )
+    return _pool
+
+
 @contextmanager
 def connect() -> Iterator[DatabaseConnection]:
+    pool = _get_pool() if USING_POSTGRES else None
+    if pool is not None:
+        raw = pool.getconn()
+        try:
+            yield DatabaseConnection(raw, postgres=True)
+            raw.commit()
+        except Exception:
+            raw.rollback()
+            raise
+        finally:
+            pool.putconn(raw)
+        return
     if USING_POSTGRES:
         import psycopg
-        from psycopg.rows import dict_row
 
-        raw = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=10, prepare_threshold=None)
+        raw = psycopg.connect(DATABASE_URL, **_postgres_kwargs())
         conn = DatabaseConnection(raw, postgres=True)
     else:
         DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +147,7 @@ CREATE TABLE IF NOT EXISTS meetings (
 );
 CREATE TABLE IF NOT EXISTS attendance_records (
   student_id TEXT NOT NULL, date TEXT NOT NULL, present INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY(student_id, date), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+  status TEXT NOT NULL DEFAULT '', PRIMARY KEY(student_id, date), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS tuition_records (
   student_id TEXT NOT NULL, month TEXT NOT NULL, status TEXT NOT NULL, amount INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +160,7 @@ CREATE TABLE IF NOT EXISTS assessment_records (
   memorization INTEGER NOT NULL DEFAULT 0, practical INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(student_id, quarter), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 SQLITE_AUDIT_SCHEMA = """
@@ -153,6 +195,9 @@ MIGRATIONS = [
     "ALTER TABLE attendance_records ADD COLUMN note TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE students ADD COLUMN telegram_chat_id TEXT",
     "ALTER TABLE students ADD COLUMN telegram_username TEXT",
+    "ALTER TABLE attendance_records ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE invoices ADD COLUMN voided_at TEXT",
+    "ALTER TABLE invoices ADD COLUMN void_reason TEXT",
 ]
 
 
@@ -167,11 +212,15 @@ def init_db() -> None:
             # The backend connects as the table owner and remains able to access them.
             for table in (
                 "students", "applications", "class_groups", "staff_users", "auth_accounts",
-                "meetings", "attendance_records", "tuition_records", "assessment_records", "audit_log",
+                "meetings", "attendance_records", "tuition_records", "assessment_records", "audit_log", "app_settings",
             ):
                 secured = conn.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(?)", (table,)).fetchone()
                 if not secured or not secured["relrowsecurity"]:
                     conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+
+    from .finance import init_finance
+    with connect() as conn:
+        init_finance(conn)
 
     # Separate transactions prevent an old-schema migration failure from aborting the full startup.
     for migration in MIGRATIONS:
@@ -187,10 +236,6 @@ def init_db() -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc):
                 raise
-
-    from .finance import init_finance
-    with connect() as conn:
-        init_finance(conn)
 
 
 def audit(event: str, payload: dict[str, Any] | None = None) -> None:

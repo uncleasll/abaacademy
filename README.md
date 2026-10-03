@@ -132,3 +132,16 @@ Teacher accounts now open the workspace immediately with their assigned password
 ## Telegram tuition reminders
 
 Accounting can generate a seven-day **Connect parent** link from the Accounting table. Send that link privately to the parent; Telegram requires the parent to open the bot and press Start before the bot is allowed to message them. Once connected, Accounting can send an invoice-specific balance reminder from the same row. The message amount and billing period are calculated from the live finance ledger, and every sent reminder is recorded in the audit log. Bot tokens and webhook secrets belong only in Render environment variables, never in frontend code or Git.
+
+## Operations notes
+
+- **Timezone.** `ACADEMY_TIMEZONE` (default `America/New_York`) decides what "today" is for attendance, invoice due dates and overdue status. The server clock stays in UTC.
+- **Class sessions.** A teacher's **Save class** sends one request (`POST /api/class-session`) that stores attendance (present / late / absent), homework and stars for the whole group atomically. Opening an earlier date shows what was recorded that day.
+- **Invoice corrections.** Finance can correct an invoice amount or due date, or void an invoice that has no active payments (**Tuition & Payments → Monthly balances → Correct or void**). Voided invoices stay in the ledger for audit and no longer count toward balances; creating the same month again restores the invoice.
+- **Enrollment.** IT Admin ends or reactivates enrollment from the student profile. Terminated students free their seat and receive no new scheduled invoices; reactivation respects group capacity.
+- **Weekly schedule.** Stored on the server (`PUT /api/schedule`) and shared by all staff; overlapping classes for one teacher are rejected.
+- **Scheduled invoices** are issued once per academy day on the first request after midnight, rather than on every page load.
+- **Sign-in protection.** Eight wrong passwords for one account from one address within 15 minutes block further attempts for that window (HTTP 429). Limits are kept in memory per server process.
+- **Telegram.** A Telegram outage at startup no longer stops the API; the webhook is re-registered on the next start. Webhook calls are also verified with Telegram's secret-token header.
+- **Connection pooling** is opt-in: set `DB_POOL_MAX=5` on Render to reuse PostgreSQL connections, and watch the first deploy.
+- **Tests:** `cd backend && .venv/bin/python -m unittest discover -s tests`

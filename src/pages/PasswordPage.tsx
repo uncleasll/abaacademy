@@ -19,7 +19,7 @@ export function PasswordPage({ required = false, onClose }: { required?: boolean
       await changePassword(currentPassword, newPassword);
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message.replace(/^\d+ /, "") : "Could not change password. Please try again.");
+      setError(err instanceof Error ? err.message : "Could not change password. Please try again.");
     } finally { setSaving(false); }
   }
   return <main className="grid min-h-dvh place-items-center bg-cream p-4">

@@ -182,7 +182,7 @@ export function AdminOverview() {
         return { student, attendance, score, riskReason };
       })
       .sort((a, b) => b.score - a.score);
-  }, [attendanceRecords, kpi.monthRecords, scopedStudents]);
+  }, [kpi.monthRecords, scopedStudents]);
 
   const topPerformers = rankedStudents.slice(0, 5);
   const needsSupport = [...rankedStudents]

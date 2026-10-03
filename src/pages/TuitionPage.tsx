@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CreditCard, FileDown, Search } from 'lucide-react';
 import { useAcademy } from '../data/academyStore';
-import { localToday, usd, type BillingPlan, type Payment } from '../data/financeTypes';
+import { localToday, usd, type BillingPlan, type Invoice, type Payment } from '../data/financeTypes';
 import { downloadCsv } from '../utils/exportCsv';
 import { SectionTitle } from '../components/ui';
 
@@ -9,7 +9,7 @@ const input = 'mt-1 w-full rounded-lg border border-line bg-white px-3 py-2.5 te
 const button = 'rounded-lg bg-green-900 px-4 py-2.5 text-sm font-semibold text-cream disabled:opacity-40';
 
 export function TuitionPage() {
-  const { students, invoices, payments, billingPlans, recordPayment, createInvoice, saveBillingPlan, voidPayment, apiOnline, downloadReceipts } = useAcademy();
+  const { students, invoices, payments, billingPlans, recordPayment, createInvoice, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, apiOnline, downloadReceipts } = useAcademy();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,9 +62,11 @@ export function TuitionPage() {
           </form>
         </details>
         <section className="rounded-xl border border-line bg-white p-5"><h2 className="font-bold">Monthly balances</h2>
-          <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-line"><th className="py-2">Period / due</th><th>Billed</th><th>Received</th><th>Remaining</th></tr></thead><tbody>
-            {invoices.filter(i => i.studentId === selected.id).map(i => <tr className="border-b border-line" key={i.id}><td className="py-3">{i.period}<p className="text-xs text-ink/50">{i.dueDate}{i.overdue ? ' · overdue' : ''}</p></td><td>{usd.format(i.amount)}</td><td>{usd.format(i.paid)}</td><td className={i.overdue ? 'font-semibold text-red-700' : ''}>{usd.format(i.balance)}</td></tr>)}
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-line"><th className="py-2">Period / due</th><th>Billed</th><th>Received</th><th>Remaining</th><th>Correction</th></tr></thead><tbody>
+            {invoices.filter(i => i.studentId === selected.id).map(i => <tr className={`border-b border-line align-top ${i.voided ? 'text-ink/40' : ''}`} key={i.id}><td className="py-3">{i.period}{i.voided && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold">VOID</span>}<p className="text-xs text-ink/50">{i.voided ? i.voidReason : `${i.dueDate}${i.overdue ? ' · overdue' : ''}`}</p></td><td className={`py-3 ${i.voided ? 'line-through' : ''}`}>{usd.format(i.amount)}</td><td className="py-3">{usd.format(i.paid)}</td><td className={`py-3 ${i.overdue ? 'font-semibold text-red-700' : ''}`}>{usd.format(i.balance)}</td>
+              <td className="py-3">{!i.voided && <InvoiceCorrection key={`${i.id}:${i.amount}:${i.dueDate}`} invoice={i} busy={busy} onAdjust={(amount, dueDate, reason) => run(() => adjustInvoice(i.id, { amount, dueDate, reason }), 'Invoice corrected. Balances and reports updated.')} onVoid={reason => run(() => voidInvoice(i.id, reason), 'Invoice voided. It no longer counts toward the balance.')} />}</td></tr>)}
           </tbody></table></div>
+          {!invoices.some(i => i.studentId === selected.id) && <p className="py-5 text-sm text-ink/50">No invoices yet.</p>}
         </section>
         <section className="rounded-xl border border-line bg-white p-5"><h2 className="font-bold">Payment history & receipts</h2>
           <p className="mt-1 text-xs text-ink/50">Receipts keep the student and parent details from the day payment was recorded. Voiding corrects a record; it does not refund money.</p>
@@ -100,7 +102,7 @@ function PaymentForm({ studentId, busy, run, submit }: { studentId: string; busy
 
 function BillingForm({ studentId, plan, busy, run, save }: { studentId: string; plan?: BillingPlan; busy: boolean; run: Run; save: (plan: BillingPlan) => Promise<void> }) {
   return <details className="rounded-xl border border-line bg-white p-5" open={!plan}><summary className="cursor-pointer font-semibold">Automatic monthly billing {plan ? `· ${usd.format(plan.amount)} · ${plan.active ? 'on' : 'paused'}` : '· set up once'}</summary>
-    <p className="mt-3 text-sm text-ink/55">One invoice per month from the first through the last month, including both. Due invoices appear automatically when staff open the app. Existing invoices stay unchanged. Use separate periods for school breaks.</p>
+    <p className="mt-3 text-sm text-ink/55">One invoice per month from the first through the last month, including both. Due invoices appear automatically when staff open the app. Invoices already issued keep their amount; correct or void one from Monthly balances below. Use separate periods for school breaks.</p>
     <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void run(() => save({ studentId, amount: Number(f.get('amount')), startMonth: String(f.get('startMonth')), endMonth: String(f.get('endMonth')), dueDay: Number(f.get('dueDay')), active: f.get('active') === 'on' }), 'Monthly billing saved. Due invoices and balances updated.'); }}>
       <label className="text-sm">Monthly tuition (USD)<input name="amount" className={input} type="number" min="0.01" max="100000" step="0.01" defaultValue={plan?.amount} required disabled={busy} /></label>
       <label className="text-sm">Due day of month (1–28)<input name="dueDay" className={input} type="number" min="1" max="28" defaultValue={plan?.dueDay ?? 1} required disabled={busy} /></label>
@@ -109,6 +111,26 @@ function BillingForm({ studentId, plan, busy, run, save }: { studentId: string; 
       <label className="text-sm"><input name="active" type="checkbox" defaultChecked={plan?.active ?? true} disabled={busy} /> Enable monthly billing</label>
       <p className="text-xs text-ink/50">If the first month is in the past, missing invoices through the current month will be created. Paused or terminated students receive no new invoices.</p>
       <button className={`${button} sm:col-span-2`} disabled={busy}>Save billing schedule</button>
+    </form>
+  </details>;
+}
+
+function InvoiceCorrection({ invoice, busy, onAdjust, onVoid }: { invoice: Invoice; busy: boolean; onAdjust: (amount: string, dueDate: string, reason: string) => Promise<void>; onVoid: (reason: string) => Promise<void> }) {
+  const [amount, setAmount] = useState(invoice.amount.toFixed(2));
+  const [dueDate, setDueDate] = useState(invoice.dueDate);
+  const [reason, setReason] = useState('');
+  const field = 'rounded border border-line p-2 text-sm';
+  const ready = reason.trim().length >= 5;
+  return <details className="text-sm"><summary className="cursor-pointer text-ink/50">Correct or void</summary>
+    <form className="mt-2 grid min-w-56 gap-2" onSubmit={e => { e.preventDefault(); void onAdjust(amount, dueDate, reason.trim()); }}>
+      <label className="text-xs">Billed amount (USD)<input className={`${field} mt-1 w-full`} type="number" required min={Math.max(invoice.paid, 0.01)} max="100000" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} disabled={busy} /></label>
+      {/^\d{4}-\d{2}-\d{2}$/.test(invoice.dueDate) && <label className="text-xs">Due date<input className={`${field} mt-1 w-full`} type="date" required value={dueDate} onChange={e => setDueDate(e.target.value)} disabled={busy} /></label>}
+      <label className="text-xs">Reason<input className={`${field} mt-1 w-full`} required minLength={5} maxLength={1000} placeholder="Why is this being corrected?" value={reason} onChange={e => setReason(e.target.value)} disabled={busy} /></label>
+      <div className="flex flex-wrap gap-2">
+        <button className="rounded bg-green-900 px-3 py-2 text-xs font-semibold text-cream disabled:opacity-40" disabled={busy || !ready}>Save correction</button>
+        <button type="button" className="rounded bg-red-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40" disabled={busy || !ready || invoice.paid > 0} title={invoice.paid > 0 ? 'Void the recorded payments first' : undefined} onClick={() => void onVoid(reason.trim())}>Void invoice</button>
+      </div>
+      {invoice.paid > 0 && <p className="text-xs text-ink/50">This invoice has payments. Void those first to void the invoice.</p>}
     </form>
   </details>;
 }
