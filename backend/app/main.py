@@ -3,16 +3,14 @@ from __future__ import annotations
 from datetime import date, timedelta
 import csv
 import hashlib
-import hmac
 import io
 import json
-import logging
 import os
 import threading
 import time
 from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -29,14 +27,13 @@ from .schemas import (
     StaffUserCreate,
     StatusPatch,
     StudentPatch,
-    TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid, TelegramReminder,
+    TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid,
     ClassSessionWrite, InvoiceVoid, InvoiceAdjust, ScheduleWrite,
 )
 from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env, provision_teacher_groups
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
 
 app = FastAPI(title="ABA Academy API", version="1.0.0")
-logger = logging.getLogger("aba.api")
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -98,8 +95,6 @@ def student_row(row):
         "enrollmentStatus": data.get("enrollment_status", "active"),
         "financeNote": data.get("finance_note", ""),
         "terminationNote": data.get("termination_note", ""),
-        "telegramConnected": bool(data.get("telegram_chat_id")),
-        "telegramUsername": data.get("telegram_username", "") or "",
     }
 
 
@@ -492,6 +487,11 @@ def bootstrap(user=Depends(get_ready_user)):
                                                  amount=i["paid"], balance=i["balance"], dueDate=i["dueDate"]) for i in ledger["invoices"]]
         for group in groups:
             group["enrolled"] = sum(1 for student in students if student["klass"] == group["name"] and student["enrollmentStatus"] == "active")
+        chats = {row["group_id"]: row["chat_id"] for row in conn.execute("SELECT group_id, chat_id FROM group_telegram").fetchall()}
+        for group in groups:
+            group["telegramConnected"] = bool(chats.get(group["id"]))
+            if user["role"] in {"IT Admin", "Registration"}:
+                group["telegramChatId"] = chats.get(group["id"], "")
         schedule = read_schedule(conn)
         if user["role"] == "Teacher":
             # Teachers see whether a family is in good standing, never the ledger itself.
@@ -621,7 +621,11 @@ def save_class_session(payload: ClassSessionWrite, user=Depends(require_roles("I
             )
             recalculate_attendance_summary(conn, entry.studentId)
         finance.audit_in_transaction(conn, "class_session.saved", {"actorId": user["id"], "date": payload.date, "students": len(ids)})
-    return {"ok": True, "saved": len(ids)}
+        groups = conn.execute(
+            f"SELECT DISTINCT g.id, g.name FROM class_groups g JOIN students s ON s.klass = g.name WHERE s.id IN ({placeholders}) ORDER BY g.name", ids).fetchall()
+    # Posted only after the class is committed, so a Telegram problem can never lose attendance.
+    posts = [telegram.post_class_attendance(group["id"], group["name"], payload.date) for group in groups]
+    return {"ok": True, "saved": len(ids), "telegram": [post for post in posts if post["status"] != "not_connected"]}
 
 
 @app.put("/api/schedule")
@@ -816,36 +820,6 @@ def delete_meeting(meeting_id: str, user=Depends(require_roles("IT Admin", "Regi
         conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
     audit("meeting.deleted", {"meetingId": meeting_id, "actorId": user["id"]})
     return None
-
-
-@app.post("/api/telegram/students/{student_id}/link")
-def create_telegram_link(student_id: str, user=Depends(require_roles("IT Admin", "Finance", "Registration"))):
-    link = telegram.create_link(student_id)
-    audit("telegram.link_created", {"studentId": student_id, "actorId": user["id"]})
-    return {"url": link}
-
-
-@app.post("/api/telegram/reminders")
-def send_telegram_reminder(payload: TelegramReminder, user=Depends(require_roles("IT Admin", "Finance"))):
-    result = telegram.send_balance_reminder(payload.studentId, payload.invoiceId)
-    audit("telegram.reminder_sent", {"studentId": payload.studentId, "invoiceId": payload.invoiceId, "actorId": user["id"], "amount": result["amount"]})
-    return result
-
-
-@app.post("/api/telegram/webhook/{secret}")
-def telegram_webhook(secret: str, update: dict = Body(default_factory=dict),
-                     x_telegram_bot_api_secret_token: str | None = Header(default=None)):
-    # Declared sync so FastAPI runs the database and Telegram calls in a worker thread, not on the event loop.
-    if not telegram.WEBHOOK_SECRET or not hmac.compare_digest(secret, telegram.WEBHOOK_SECRET):
-        raise HTTPException(404, "Not found")
-    if x_telegram_bot_api_secret_token is not None and not hmac.compare_digest(x_telegram_bot_api_secret_token, telegram.header_secret()):
-        raise HTTPException(404, "Not found")
-    try:
-        telegram.accept_update(update)
-    except Exception:
-        # Returning an error makes Telegram redeliver the same update indefinitely.
-        logger.exception("Telegram update could not be processed")
-    return {"ok": True}
 
 
 def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingResponse:
@@ -1085,6 +1059,12 @@ def edit_group(group_id: str, payload: GroupWrite, user=Depends(require_roles("I
     return save_group(group_id, payload, user)
 
 
+@app.post("/api/groups/{group_id}/telegram-test")
+def test_group_telegram(group_id: str, user=Depends(require_roles("IT Admin", "Registration"))):
+    telegram.send_group_test(group_id)
+    return {"ok": True}
+
+
 def save_group(group_id, payload, user):
     if len(payload.name.strip()) < 2 or len(payload.program.strip()) < 2:
         raise HTTPException(422, "Group name and program must contain at least two characters")
@@ -1110,6 +1090,10 @@ def save_group(group_id, payload, user):
         else:
             group_id = str(uuid4())
             conn.execute("INSERT INTO class_groups VALUES (?, ?, ?, ?, ?, ?, 0)", (group_id,payload.name.strip(),payload.teacher,payload.program,payload.schedule,payload.capacity))
+        if payload.telegramChatId is not None:
+            conn.execute("DELETE FROM group_telegram WHERE group_id=?", (group_id,))
+            if payload.telegramChatId:
+                conn.execute("INSERT INTO group_telegram(group_id, chat_id) VALUES (?, ?)", (group_id, payload.telegramChatId))
         finance.audit_in_transaction(conn, "group.saved", {"actorId":user["id"], "groupId":group_id})
     return {"id":group_id}
 

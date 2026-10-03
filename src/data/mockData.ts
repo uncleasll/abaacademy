@@ -28,8 +28,6 @@ export interface Student {
   tuitionStatus: PaymentStatus;
   amountDue: number;
   billingConfigured?: boolean;
-  telegramConnected?: boolean;
-  telegramUsername?: string;
   joinedDate?: string;
   enrollmentStatus?: EnrollmentStatus;
   financeNote?: string;
@@ -159,6 +157,10 @@ export interface ClassGroup {
   schedule: string;
   capacity: number;
   enrolled: number;
+  /** Whether the daily attendance post goes to a Telegram group for this class. */
+  telegramConnected?: boolean;
+  /** Only sent to IT Admin and Registration. */
+  telegramChatId?: string;
 }
 
 export const classGroups: ClassGroup[] = [

@@ -197,12 +197,19 @@ Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} abs
     setNotice("Saving class…");
     try {
       // One request stores the whole class: either every student is saved or none are.
-      await saveClassSession(
+      const posts = await saveClassSession(
         sessionDate,
         visibleRows.map((row) => ({ studentId: row.id, attendance: row.attendance, stars: row.stars, hw: row.hw, nextHw: row.nextHwDraft }))
       );
       setSaved(true); setSessionState("saved");
-      setNotice(`${visibleRows.length} student records saved for ${sessionDate}.`);
+      const failed = posts.filter((post) => post.status === "failed");
+      const posted = posts.filter((post) => post.status === "sent" || post.status === "updated");
+      const telegramNote = failed.length
+        ? ` The class is saved, but the Telegram post failed (${failed[0].detail ?? "Telegram error"}). Press Save class again to resend, or copy the summary below.`
+        : posted.length
+          ? posted.some((post) => post.status === "sent") ? " Attendance was posted to the Telegram group." : " The Telegram post was updated."
+          : "";
+      setNotice(`${visibleRows.length} student records saved for ${sessionDate}.${telegramNote}`);
     } catch (error) {
       setNotice(`Class was not saved: ${error instanceof Error ? error.message : "connection error"} Your draft is kept; press Save class to retry.`);
     } finally {
@@ -368,7 +375,11 @@ Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} abs
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
           <div>
             <h2 className="text-lg font-bold text-ink">Daily Telegram summary</h2>
-            <p className="mt-0.5 text-sm text-ink/45">Copy the class summary after saving and paste it into your Telegram group.</p>
+            <p className="mt-0.5 text-sm text-ink/45">
+              {activeGroup?.telegramConnected
+                ? "This group's attendance is posted to its Telegram group automatically when you save. You can also copy the summary."
+                : "No Telegram group is connected for this class yet. Copy the summary after saving and paste it into your group."}
+            </p>
           </div>
           <ChevronDown size={18} className="text-ink/45" />
         </summary>

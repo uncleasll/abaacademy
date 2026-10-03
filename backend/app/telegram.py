@@ -1,35 +1,28 @@
 from __future__ import annotations
 
-import hashlib
+import html
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from uuid import uuid4
 
 from fastapi import HTTPException
 
 from .database import connect
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
-WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
-PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "").strip().rstrip("/")
+API_BASE = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org").strip().rstrip("/")
+ACADEMY_NAME = os.getenv("TELEGRAM_ACADEMY_NAME", "Al-Bukhari Academy").strip() or "Al-Bukhari Academy"
 logger = logging.getLogger("aba.telegram")
-
-
-def header_secret() -> str:
-    """Telegram only allows [A-Za-z0-9_-] in secret_token, so send a digest of the configured secret."""
-    return hashlib.sha256(WEBHOOK_SECRET.encode()).hexdigest()
 
 
 def _call(method: str, payload: dict) -> dict:
     if not BOT_TOKEN:
         raise HTTPException(503, "Telegram bot is not configured")
     request = Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
+        f"{API_BASE}/bot{BOT_TOKEN}/{method}",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -46,102 +39,88 @@ def _call(method: str, payload: dict) -> dict:
 
 def init_telegram() -> None:
     with connect() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS telegram_links (
-          token TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-          expires_at TEXT NOT NULL, used_at TEXT
+        # Class group chats that receive the daily attendance post, and the post already sent for each class day.
+        conn.execute("CREATE TABLE IF NOT EXISTS group_telegram (group_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS telegram_class_posts (
+          group_id TEXT NOT NULL, date TEXT NOT NULL, chat_id TEXT NOT NULL, message_id TEXT NOT NULL,
+          PRIMARY KEY(group_id, date)
         )""")
         if conn.postgres:
-            secured = conn.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('telegram_links')").fetchone()
-            if not secured or not secured["relrowsecurity"]:
-                conn.execute("ALTER TABLE telegram_links ENABLE ROW LEVEL SECURITY")
-    if BOT_TOKEN and PUBLIC_API_URL and WEBHOOK_SECRET:
-        try:
-            _call("setWebhook", {
-                "url": f"{PUBLIC_API_URL}/api/telegram/webhook/{WEBHOOK_SECRET}",
-                "allowed_updates": ["message"],
-                "drop_pending_updates": False,
-                "secret_token": header_secret(),
-            })
-        except HTTPException as exc:
-            # A Telegram outage must not keep the academy API from starting.
-            logger.warning("Telegram webhook was not registered: %s", exc.detail)
+            for table in ("group_telegram", "telegram_class_posts"):
+                secured = conn.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(?)", (table,)).fetchone()
+                if not secured or not secured["relrowsecurity"]:
+                    conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+ATTENDANCE_ORDER = {"present": 1, "late": 2, "absent": 3}
+HOMEWORK_LABELS = {"done": "Done", "partial": "Partial", "not_done": "Not done"}
+DIVIDER = "──────────────────"
 
 
-def create_link(student_id: str) -> str:
-    if not BOT_USERNAME:
-        raise HTTPException(503, "TELEGRAM_BOT_USERNAME is not configured")
-    token = uuid4().hex
-    expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+def build_attendance_message(day: str, rows: list[dict]) -> str:
+    """The daily class post parents already know from the academy's earlier spreadsheet bot."""
+    title = f"{ACADEMY_NAME} | Attendance | {date.fromisoformat(day).strftime('%d %b %Y')}"
+    lines = [f"<b>{html.escape(title)}</b>", DIVIDER, ""]
+    ordered = sorted(rows, key=lambda row: (ATTENDANCE_ORDER.get(row["attendance"], 9), row["name"]))
+    for index, row in enumerate(ordered, start=1):
+        lines.append(f"<b>{index}. {html.escape(row['name'])}</b>")
+        if row["attendance"] == "absent":
+            lines += ["  ❌ Absent", ""]
+            continue
+        stars = max(0, min(5, int(row["stars"] or 0)))
+        lines.append(f"  {row['attendance'].capitalize()} | {'★' * stars}{'☆' * (5 - stars)} | Last HW: {HOMEWORK_LABELS.get(row['hw'], '-')}")
+        if row["next_hw"]:
+            lines.append(f"  Next HW: <b><i>{html.escape(row['next_hw'])}</i></b>")
+        lines.append("")
+    lines += [DIVIDER, "<b><i>📖 My Lord! Increase me in knowledge. -Surah Taha 20:114</i></b>"]
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        # Cut on a line boundary so no HTML tag is left open.
+        text = text[:3900].rsplit("\n", 1)[0] + "\n…"
+    return text
+
+
+def post_class_attendance(group_id: str, group_name: str, day: str) -> dict:
+    """Post one group's class day to its Telegram chat; saving the day again edits that same post."""
+    result = {"group": group_name}
     with connect() as conn:
-        if not conn.execute("SELECT id FROM students WHERE id=?", (student_id,)).fetchone():
-            raise HTTPException(404, "Student not found")
-        conn.execute("DELETE FROM telegram_links WHERE student_id=? AND used_at IS NULL", (student_id,))
-        conn.execute("INSERT INTO telegram_links VALUES (?, ?, ?, NULL)", (token, student_id, expires))
-    return f"https://t.me/{BOT_USERNAME}?start={token}"
-
-
-def _reply(chat_id: str, text: str) -> None:
+        target = conn.execute("SELECT chat_id FROM group_telegram WHERE group_id=?", (group_id,)).fetchone()
+        if not target or not target["chat_id"]:
+            return {**result, "status": "not_connected"}
+        rows = [dict(row) for row in conn.execute(
+            """SELECT s.name, s.stars, s.hw, s.next_hw, a.present, a.status FROM attendance_records a
+               JOIN students s ON s.id = a.student_id
+               WHERE s.klass = ? AND a.date = ? AND s.enrollment_status = 'active'""", (group_name, day)).fetchall()]
+        previous = conn.execute("SELECT chat_id, message_id FROM telegram_class_posts WHERE group_id=? AND date=?", (group_id, day)).fetchone()
+    if not BOT_TOKEN:
+        return {**result, "status": "failed", "detail": "Telegram bot is not configured"}
+    if not rows:
+        return {**result, "status": "skipped"}
+    for row in rows:
+        row["attendance"] = row["status"] or ("present" if row["present"] else "absent")
+    chat_id = target["chat_id"]
+    payload = {"chat_id": chat_id, "text": build_attendance_message(day, rows), "parse_mode": "HTML"}
     try:
-        _call("sendMessage", {"chat_id": chat_id, "text": text})
+        if previous and previous["chat_id"] == chat_id:
+            try:
+                _call("editMessageText", {**payload, "message_id": int(previous["message_id"])})
+                return {**result, "status": "updated"}
+            except HTTPException as exc:
+                if "not modified" in str(exc.detail):
+                    return {**result, "status": "updated"}
+                # The earlier post was deleted or is too old to edit: fall through and post again.
+        message = _call("sendMessage", payload)
     except HTTPException as exc:
-        logger.warning("Telegram reply failed: %s", exc.detail)
-
-
-def accept_update(update: dict) -> None:
-    message = update.get("message") or {}
-    text = str(message.get("text") or "").strip()
-    if not text.startswith("/start "):
-        return
-    token = text.split(maxsplit=1)[1].strip()
-    chat = message.get("chat") or {}
-    chat_id = str(chat.get("id") or "")
-    if not chat_id:
-        return
-    now = datetime.now(timezone.utc).isoformat()
-    student = None
+        logger.warning("Attendance post for %s failed: %s", group_name, exc.detail)
+        return {**result, "status": "failed", "detail": str(exc.detail)}
     with connect() as conn:
-        link = conn.execute("SELECT * FROM telegram_links WHERE token=? AND used_at IS NULL", (token,)).fetchone()
-        if link and link["expires_at"] >= now:
-            username = str((message.get("from") or {}).get("username") or "")
-            conn.execute("UPDATE students SET telegram_chat_id=?, telegram_username=? WHERE id=?", (chat_id, username, link["student_id"]))
-            conn.execute("UPDATE telegram_links SET used_at=? WHERE token=?", (now, token))
-            student = conn.execute("SELECT name FROM students WHERE id=?", (link["student_id"],)).fetchone()
-    # Replies are sent after the link is committed; a failed reply must not undo or retry the connection.
-    if student:
-        _reply(chat_id, f"✅ Telegram connected for {student['name']}. ABA Academy can now send tuition reminders here.")
-    else:
-        _reply(chat_id, "This connection link is invalid or expired. Please request a new link from ABA Academy.")
+        conn.execute("""INSERT INTO telegram_class_posts(group_id, date, chat_id, message_id) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(group_id, date) DO UPDATE SET chat_id=excluded.chat_id, message_id=excluded.message_id""",
+                     (group_id, day, chat_id, str(message.get("message_id"))))
+    return {**result, "status": "sent"}
 
 
-def send_balance_reminder(student_id: str, invoice_id: str | None = None) -> dict:
+def send_group_test(group_id: str) -> None:
     with connect() as conn:
-        student = conn.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
-        if not student:
-            raise HTTPException(404, "Student not found")
-        if not student["telegram_chat_id"]:
-            raise HTTPException(409, "Parent has not connected Telegram yet")
-        params: tuple = (student_id,)
-        condition = "i.student_id=?"
-        if invoice_id:
-            condition += " AND i.id=?"
-            params = (student_id, invoice_id)
-        rows = conn.execute(f"""SELECT i.*, COALESCE(SUM(CASE WHEN p.voided_at IS NULL THEN p.amount_cents ELSE 0 END),0) paid
-          FROM invoices i LEFT JOIN payments p ON p.invoice_id=i.id WHERE {condition} AND i.voided_at IS NULL
-          GROUP BY i.id ORDER BY i.due_date""", params).fetchall()
-        open_rows = [row for row in rows if row["amount_cents"] > row["paid"]]
-        if not open_rows:
-            raise HTTPException(409, "No outstanding balance for this student")
-        total = sum(row["amount_cents"] - row["paid"] for row in open_rows) / 100
-        periods = ", ".join(str(row["period"]) for row in open_rows[:4])
-        if len(open_rows) > 4:
-            periods += f" +{len(open_rows) - 4} more"
-        chat_id = student["telegram_chat_id"]
-    text = (
-        f"ABA Academy tuition reminder\n\n"
-        f"Student: {student['name']}\n"
-        f"Period: {periods}\n"
-        f"Outstanding balance: ${total:,.2f}\n\n"
-        "If you have already paid, please contact the academy so we can update the record. Thank you."
-    )
-    result = _call("sendMessage", {"chat_id": chat_id, "text": text})
-    return {"ok": True, "messageId": result.get("message_id"), "amount": total}
+        target = conn.execute("SELECT chat_id FROM group_telegram WHERE group_id=?", (group_id,)).fetchone()
+    if not target or not target["chat_id"]:
+        raise HTTPException(409, "Save a Telegram chat ID for this group first")
+    _call("sendMessage", {"chat_id": target["chat_id"], "text": f"✅ {ACADEMY_NAME}: this group is connected. Daily attendance will be posted here."})

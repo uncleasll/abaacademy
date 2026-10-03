@@ -29,6 +29,12 @@ export interface ClassSessionEntry {
   nextHw: string;
 }
 
+export interface TelegramPost {
+  group: string;
+  status: "sent" | "updated" | "skipped" | "failed";
+  detail?: string;
+}
+
 interface BootstrapData {
   invoices: Invoice[];
   payments: Payment[];
@@ -58,7 +64,8 @@ export interface AuthUser {
 interface AcademyStore extends BootstrapData {
   editStaff: (id: string, name: string) => Promise<void>;
   resetStaffPassword: (id: string, temporaryPassword: string) => Promise<void>;
-  saveGroup: (id: string | null, payload: Omit<ClassGroup, "id" | "enrolled">) => Promise<void>;
+  saveGroup: (id: string | null, payload: Omit<ClassGroup, "id" | "enrolled" | "telegramConnected">) => Promise<void>;
+  testGroupTelegram: (id: string) => Promise<void>;
   transferStudent: (id: string, groupId: string) => Promise<void>;
   recordPayment: (payload: PaymentInput) => Promise<void>;
   createInvoice: (payload: InvoiceInput) => Promise<void>;
@@ -78,14 +85,12 @@ interface AcademyStore extends BootstrapData {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateStudent: (id: string, patch: Partial<Student>) => Promise<void>;
-  saveClassSession: (date: string, entries: ClassSessionEntry[]) => Promise<void>;
+  saveClassSession: (date: string, entries: ClassSessionEntry[]) => Promise<TelegramPost[]>;
   updateAttendanceRecord: (studentId: string, date: string, status: AttendanceStatus) => Promise<void>;
   updateAssessmentRecord: (record: AssessmentRecord) => Promise<void>;
   createApplication: (payload: Omit<Application, "id" | "submitted" | "status"> & { intakeMode?: "application" | "review" | "enroll" }) => Promise<Application>;
   updateApplicationStatus: (id: string, status: Application["status"]) => Promise<Application | undefined>;
   updateUserStatus: (id: string, status: StaffUser["status"]) => Promise<StaffUser | undefined>;
-  createTelegramLink: (studentId: string) => Promise<string>;
-  sendTelegramReminder: (studentId: string, invoiceId?: string) => Promise<void>;
   downloadFinanceExport: () => Promise<void>;
   downloadReceipts: () => Promise<void>;
 }
@@ -343,7 +348,9 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     const voidPayment: AcademyStore["voidPayment"] = (id, reason) => done(mutate(`/api/finance/payments/${id}/void`, { reason }));
     const saveSchedule: AcademyStore["saveSchedule"] = blocks => done(mutate("/api/schedule", { blocks }, "PUT"));
     const updateStudent: AcademyStore["updateStudent"] = (id, patch) => done(mutate(`/api/students/${id}`, patch, "PATCH"));
-    const saveClassSession: AcademyStore["saveClassSession"] = (date, entries) => done(mutate("/api/class-session", { date, entries }));
+    const saveClassSession: AcademyStore["saveClassSession"] = async (date, entries) =>
+      (await mutate<{ telegram?: TelegramPost[] }>("/api/class-session", { date, entries })).telegram ?? [];
+    const testGroupTelegram: AcademyStore["testGroupTelegram"] = id => done(api(`/api/groups/${id}/telegram-test`, { method: "POST" }));
     const createApplication: AcademyStore["createApplication"] = payload => mutate<Application>("/api/applications", payload);
     const updateApplicationStatus: AcademyStore["updateApplicationStatus"] = (id, status) => mutate<Application>(`/api/applications/${id}/status`, { status }, "PATCH");
     const updateUserStatus: AcademyStore["updateUserStatus"] = (id, status) => mutate<StaffUser>(`/api/users/${id}/status`, { status }, "PATCH");
@@ -403,24 +410,12 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       return entry.running;
     };
 
-    const createTelegramLink: AcademyStore["createTelegramLink"] = async (studentId) => {
-      const result = await api<{ url: string }>(`/api/telegram/students/${studentId}/link`, { method: "POST" });
-      return result.url;
-    };
-
-    const sendTelegramReminder: AcademyStore["sendTelegramReminder"] = async (studentId, invoiceId) => {
-      await api("/api/telegram/reminders", {
-        method: "POST",
-        body: JSON.stringify({ studentId, invoiceId: invoiceId || null }),
-      });
-    };
-
     const downloadFinanceExport: AcademyStore["downloadFinanceExport"] = () => guard(() => downloadFile("/api/finance/export", "aba-tuition-report.csv"));
     const downloadReceipts: AcademyStore["downloadReceipts"] = () => guard(() => downloadFile("/api/finance/receipts", "aba-paid-receipts.csv"));
 
     return {
       ...data,
-      editStaff, resetStaffPassword, saveGroup, transferStudent,
+      editStaff, resetStaffPassword, saveGroup, testGroupTelegram, transferStudent,
       recordPayment, createInvoice, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, saveSchedule,
       loading,
       authLoading,
@@ -439,8 +434,6 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
       createApplication,
       updateApplicationStatus,
       updateUserStatus,
-      createTelegramLink,
-      sendTelegramReminder,
       downloadFinanceExport,
       downloadReceipts,
     };

@@ -289,11 +289,6 @@ class ScheduleWrite(BaseModel):
     blocks: list[ScheduleBlock] = Field(max_length=200)
 
 
-class TelegramReminder(BaseModel):
-    studentId: str
-    invoiceId: str | None = None
-
-
 class StaffEdit(BaseModel):
     name: str = Field(min_length=2, max_length=100)
 
@@ -308,6 +303,8 @@ class GroupWrite(BaseModel):
     program: str = Field(min_length=2, max_length=100)
     schedule: str = Field(default='', max_length=200)
     capacity: int = Field(ge=1, le=200)
+    # Telegram group/supergroup ids are negative numbers such as -1001234567890; None leaves the saved value alone.
+    telegramChatId: str | None = Field(default=None, pattern=r'^(-?\d{5,20})?$')
 
 
 class PlacementWrite(BaseModel):

@@ -39,7 +39,7 @@ class OperationsTest(unittest.TestCase):
         missing = {**session, 'entries': session['entries'] + [dict(studentId='nobody', attendance='present', stars=1, hw='done')]}
         self.assertEqual(self.call('/api/class-session', missing, firuz)[0], 404)
         self.assertEqual(self.call('/api/bootstrap', token=firuz)[1]['attendanceRecords'], [])
-        self.assertEqual(self.call('/api/class-session', session, firuz), (200, {'ok': True, 'saved': 2}))
+        self.assertEqual(self.call('/api/class-session', session, firuz), (200, {'ok': True, 'saved': 2, 'telegram': []}))
         data = self.call('/api/bootstrap', token=firuz)[1]
         saved = {s['id']: s for s in data['students']}
         self.assertEqual((saved[one['id']]['attendance'], saved[one['id']]['stars'], saved[one['id']]['hw'], saved[one['id']]['nextHw'], saved[one['id']]['attendancePct']), ('late', 4, 'partial', 'Surah 1', 100))

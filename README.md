@@ -66,9 +66,8 @@ Configure the existing Render service with:
 - `JWT_SECRET`: a random secret of at least 32 characters.
 - `FRONTEND_URLS=https://abaacademy.vercel.app` (plus any approved custom frontend origins).
 - `STAFF_ACCOUNTS_JSON`: the full contents of `backend/private/teachers-bootstrap.json`.
-- `PUBLIC_API_URL=https://abaacademy.onrender.com`.
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`: values from BotFather.
-- `TELEGRAM_WEBHOOK_SECRET`: a long random value used only for Telegram webhook verification.
+- `TELEGRAM_BOT_TOKEN`: the attendance bot token from BotFather.
+- `TELEGRAM_ACADEMY_NAME`: the academy name shown in daily attendance posts.
 
 `render.yaml` describes the backend using the existing Supabase database through
 `DATABASE_URL`; it does not create an additional paid database. Applying a Blueprint
@@ -129,10 +128,6 @@ The five approved teachers receive editable starter groups (`Teacher — General
 
 Teacher accounts now open the workspace immediately with their assigned password. Password changes remain available from Change password, but are optional for teachers, including after an administrator reset. Existing teacher password hashes are preserved when the first-login requirement is cleared. Other staff roles retain the first-login requirement.
 
-## Telegram tuition reminders
-
-Accounting can generate a seven-day **Connect parent** link from the Accounting table. Send that link privately to the parent; Telegram requires the parent to open the bot and press Start before the bot is allowed to message them. Once connected, Accounting can send an invoice-specific balance reminder from the same row. The message amount and billing period are calculated from the live finance ledger, and every sent reminder is recorded in the audit log. Bot tokens and webhook secrets belong only in Render environment variables, never in frontend code or Git.
-
 ## Operations notes
 
 - **Timezone.** `ACADEMY_TIMEZONE` (default `America/New_York`) decides what "today" is for attendance, invoice due dates and overdue status. The server clock stays in UTC.
@@ -142,6 +137,18 @@ Accounting can generate a seven-day **Connect parent** link from the Accounting 
 - **Weekly schedule.** Stored on the server (`PUT /api/schedule`) and shared by all staff; overlapping classes for one teacher are rejected.
 - **Scheduled invoices** are issued once per academy day on the first request after midnight, rather than on every page load.
 - **Sign-in protection.** Eight wrong passwords for one account from one address within 15 minutes block further attempts for that window (HTTP 429). Limits are kept in memory per server process.
-- **Telegram.** A Telegram outage at startup no longer stops the API; the webhook is re-registered on the next start. Webhook calls are also verified with Telegram's secret-token header.
+- **Telegram.** Telegram is used only for daily class attendance posts. A Telegram outage never stops API startup or rolls back saved attendance.
 - **Connection pooling** is opt-in: set `DB_POOL_MAX=5` on Render to reuse PostgreSQL connections, and watch the first deploy.
 - **Tests:** `cd backend && .venv/bin/python -m unittest discover -s tests`
+
+## Daily attendance posts to class Telegram groups
+
+This replaces the academy's earlier Google Sheets script. When a teacher presses **Save class**, the day's attendance, stars, last homework and next homework for that group are posted to the group's Telegram chat in the same format parents already know. Saving the same day again edits that post instead of sending a second one.
+
+Setup, once per group:
+
+1. Add the academy bot (the one whose token is `TELEGRAM_BOT_TOKEN`) to the class Telegram group and allow it to send messages.
+2. In **Groups & Placement**, open the group and enter its **Telegram group chat ID** (a negative number such as `-1003406651107`), then save.
+3. Press **Send test message** to confirm the bot can post there.
+
+Notes: a Telegram failure never blocks saving a class; the teacher sees that the post failed and can save again to resend. Leave the chat ID empty to turn posting off for a group. `TELEGRAM_ACADEMY_NAME` (default `Al-Bukhari Academy`) sets the name in the post header. Turn off the old Apps Script trigger once a group is connected, otherwise parents receive two posts.

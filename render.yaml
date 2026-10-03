@@ -24,11 +24,7 @@ services:
         value: America/New_York
       - key: STAFF_ACCOUNTS_JSON
         sync: false
-      - key: PUBLIC_API_URL
-        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TELEGRAM_BOT_USERNAME
-        sync: false
-      - key: TELEGRAM_WEBHOOK_SECRET
-        generateValue: true
+      - key: TELEGRAM_ACADEMY_NAME
+        value: Al-Bukhari Academy
