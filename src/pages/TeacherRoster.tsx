@@ -88,7 +88,8 @@ export function TeacherRoster() {
   } = useAcademy();
   const teacherName = user?.teacherAlias ?? "";
   const teacherStudents = useMemo(
-    () => students.filter((student) => student.teacher === teacherName),
+    // Terminated students keep their history but are no longer marked in class.
+    () => students.filter((student) => student.teacher === teacherName && student.enrollmentStatus !== "terminated"),
     [students, teacherName]
   );
   const teacherGroups = useMemo(
@@ -143,7 +144,7 @@ export function TeacherRoster() {
     const absent = visibleRows.filter((row) => row.attendance === "absent").length;
     const incompleteHw = visibleRows.filter((row) => row.hw !== "done").length;
     const needsAttention = visibleRows.filter(
-      (row) => row.attendance === "absent" || row.hw === "not_done" || row.enrollmentStatus === "terminated"
+      (row) => row.attendance === "absent" || row.hw === "not_done"
     );
     return { present, late, absent, incompleteHw, needsAttention };
   }, [visibleRows]);

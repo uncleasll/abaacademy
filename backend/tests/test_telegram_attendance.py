@@ -117,6 +117,11 @@ class TelegramAttendanceTest(unittest.TestCase):
         self.assertEqual(self.call('/api/class-session', session, firuz)[1]['telegram'][0]['status'], 'updated')
         self.assertNotEqual(FakeTelegram.calls[-1][1]['message_id'], sent_id)
 
+        # A later correction from the Students page edits the same post too.
+        self.assertEqual(self.call('/api/attendance', dict(studentId=students['Yusuf'], date=today, status='absent'), firuz, 'PUT')[1]['telegram'][0]['status'], 'updated')
+        self.assertEqual(FakeTelegram.calls[-1][0], 'editMessageText')
+        self.assertIn('❌ Absent', FakeTelegram.calls[-1][1]['text'])
+
         # A Telegram outage never loses the class: attendance is saved and the failure is reported.
         self.fake.shutdown()
         self.fake.server_close()

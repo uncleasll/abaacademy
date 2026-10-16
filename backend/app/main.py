@@ -581,7 +581,8 @@ def update_attendance_record(payload: AttendanceRecordPatch, user=Depends(requir
         )
         recalculate_attendance_summary(conn, payload.studentId)
         finance.audit_in_transaction(conn, "attendance.updated", {"actorId": user["id"], "studentId": payload.studentId, "date": payload.date, "status": payload.status})
-    return {"ok": True}
+    post = telegram.refresh_posted_attendance(payload.studentId, payload.date)
+    return {"ok": True, "telegram": [post] if post else []}
 
 
 def validate_session_date(value: str) -> None:

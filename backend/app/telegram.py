@@ -118,6 +118,17 @@ def post_class_attendance(group_id: str, group_name: str, day: str) -> dict:
     return {**result, "status": "sent"}
 
 
+def refresh_posted_attendance(student_id: str, day: str) -> dict | None:
+    """After a single-student correction, update the group's post for that day if one was already sent."""
+    with connect() as conn:
+        group = conn.execute(
+            """SELECT g.id, g.name FROM class_groups g JOIN students s ON s.klass = g.name
+               JOIN telegram_class_posts p ON p.group_id = g.id AND p.date = ? WHERE s.id = ?""", (day, student_id)).fetchone()
+    if not group:
+        return None
+    return post_class_attendance(group["id"], group["name"], day)
+
+
 def send_group_test(group_id: str) -> None:
     with connect() as conn:
         target = conn.execute("SELECT chat_id FROM group_telegram WHERE group_id=?", (group_id,)).fetchone()
