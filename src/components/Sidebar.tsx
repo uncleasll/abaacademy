@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   GraduationCap,
+  Table2,
 } from "lucide-react";
 import type { Role } from "../App";
 
@@ -26,10 +27,12 @@ export const navByRole: Record<Role, NavItem[]> = {
     { key: "groups", label: "Groups & Placement", icon: Users },
     { key: "users", label: "Users & Roles", icon: UserCog },
     { key: "students", label: "Students", icon: Users },
+    { key: "matrix", label: "Payments Matrix", icon: Table2 },
     { key: "tuition", label: "Tuition & Payments", icon: Wallet },
   ],
   Finance: [
     { key: "overview", label: "Overview", icon: LayoutGrid },
+    { key: "matrix", label: "Payments Matrix", icon: Table2 },
     { key: "tuition", label: "Tuition & Payments", icon: Wallet },
   ],
   Teacher: [

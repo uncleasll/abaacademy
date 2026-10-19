@@ -7,6 +7,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { StudentsPage } from "./pages/StudentsPage";
 import { FinanceOverview } from "./pages/FinanceOverview";
 import { TuitionPage } from "./pages/TuitionPage";
+import { PaymentsMatrixPage } from "./pages/PaymentsMatrixPage";
 import { TeacherRoster } from "./pages/TeacherRoster";
 import { AssessmentsPage } from "./pages/AssessmentsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
@@ -32,10 +33,12 @@ function PageFor({ role, tab }: { role: Role; tab: string }) {
     if (tab === "groups") return <GroupsPage />;
     if (tab === "users") return <UsersPage />;
     if (tab === "students") return <StudentsPage />;
+    if (tab === "matrix") return <PaymentsMatrixPage />;
     if (tab === "tuition") return <TuitionPage />;
   }
   if (role === "Finance") {
     if (tab === "overview") return <FinanceOverview />;
+    if (tab === "matrix") return <PaymentsMatrixPage />;
     if (tab === "tuition") return <TuitionPage />;
   }
   if (role === "Teacher") {

@@ -224,6 +224,24 @@ class PaymentCreate(BaseModel):
         return self
 
 
+class LedgerEntryCreate(BaseModel):
+    """One row of the tuition ledger: a payment received for a given month. The invoice is created if needed."""
+    requestId: UUID
+    studentId: str
+    period: str = Field(pattern=r'^20\d{2}-(0[1-9]|1[0-2])$')
+    amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
+    method: Literal['cash', 'bank_transfer', 'check', 'card_external', 'zeffy']
+    paidOn: date
+    reference: str = Field(default='', max_length=200)
+    note: str = Field(default='', max_length=1000)
+
+    @model_validator(mode='after')
+    def validate_date(self):
+        if self.paidOn > academy_today():
+            raise ValueError('Payment date cannot be in the future')
+        return self
+
+
 class InvoiceCreate(BaseModel):
     requestId: UUID
     studentId: str

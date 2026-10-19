@@ -15,5 +15,6 @@ export interface PaymentInput {
   studentId: string; invoiceId: string; amount: string; method: string; paidOn: string; reference: string; note: string;
 }
 export interface InvoiceInput { studentId: string; period: string; amount: string; dueDate: string }
+export interface LedgerEntryInput { studentId: string; period: string; amount: string; method: string; paidOn: string; reference: string; note: string }
 export const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 export const localToday = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; };

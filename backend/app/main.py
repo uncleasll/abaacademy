@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date, timedelta
 import csv
 import hashlib
@@ -28,7 +29,7 @@ from .schemas import (
     StatusPatch,
     StudentPatch,
     TuitionRecordPatch, PaymentCreate, InvoiceCreate, BillingPlanUpdate, PaymentVoid,
-    ClassSessionWrite, InvoiceVoid, InvoiceAdjust, ScheduleWrite,
+    ClassSessionWrite, InvoiceVoid, InvoiceAdjust, ScheduleWrite, LedgerEntryCreate,
 )
 from .provision_teachers import STAFF_ACCOUNTS, enforce_staff_access, provision_from_env, provision_teacher_groups
 from .security import create_token, decode_token, hash_password, validate_security_config, verify_password
@@ -969,19 +970,58 @@ def record_payment(payload: PaymentCreate, user=Depends(require_roles("IT Admin"
         invoice = conn.execute("SELECT * FROM invoices WHERE id = ? AND student_id = ?", (payload.invoiceId, payload.studentId)).fetchone()
         if not invoice:
             raise HTTPException(404, "Invoice not found for this student")
-        if invoice["voided_at"]:
-            raise HTTPException(409, "This invoice is void and cannot receive payments.")
-        paid = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE invoice_id = ? AND voided_at IS NULL", (payload.invoiceId,)).fetchone()["total"]
-        cents = int(payload.amount * 100)
-        if cents > invoice["amount_cents"] - paid:
-            raise HTTPException(409, "Payment exceeds the remaining balance. Refresh and check the amount.")
-        payment_id = str(uuid4())
-        conn.execute("""INSERT INTO payments(id, invoice_id, amount_cents, method, paid_on, reference, note, actor_id,
-                     student_name, parent_name, parent_phone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                     (payment_id, payload.invoiceId, cents, payload.method, payload.paidOn.isoformat(), payload.reference,
-                      payload.note, user["id"], student["name"], student["parent_name"], student["parent_phone"], finance.now()))
+        payment_id = insert_payment(conn, user, student, invoice, payload)
         result = {"id": payment_id}
-        finance.audit_in_transaction(conn, "payment.received", {"actorId": user["id"], "paymentId": payment_id, "amountCents": cents})
+        finance.remember(conn, payload, result)
+    return result
+
+
+def insert_payment(conn, user, student, invoice, payload) -> str:
+    """Record a receipt against a locked invoice. Shared by the invoice form and the ledger entry."""
+    if invoice["voided_at"]:
+        raise HTTPException(409, "This invoice is void and cannot receive payments.")
+    paid = conn.execute("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE invoice_id = ? AND voided_at IS NULL", (invoice["id"],)).fetchone()["total"]
+    cents = int(payload.amount * 100)
+    if cents > invoice["amount_cents"] - paid:
+        remaining = (invoice["amount_cents"] - paid) / 100
+        raise HTTPException(409, f"Payment exceeds the remaining balance for {invoice['period']} (${remaining:,.2f} left). Correct the invoice amount first if the family pays more.")
+    payment_id = str(uuid4())
+    conn.execute("""INSERT INTO payments(id, invoice_id, amount_cents, method, paid_on, reference, note, actor_id,
+                 student_name, parent_name, parent_phone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 (payment_id, invoice["id"], cents, payload.method, payload.paidOn.isoformat(), payload.reference,
+                  payload.note, user["id"], student["name"], student["parent_name"], student["parent_phone"], finance.now()))
+    finance.audit_in_transaction(conn, "payment.received", {"actorId": user["id"], "paymentId": payment_id, "invoiceId": invoice["id"], "amountCents": cents})
+    return payment_id
+
+
+@app.post("/api/finance/ledger-entries", status_code=201)
+def create_ledger_entry(payload: LedgerEntryCreate, user=Depends(require_roles("IT Admin", "Finance"))):
+    """Spreadsheet-style entry: date, student, month, amount. The month's invoice is created when it does not exist yet,
+    using the billing plan amount when there is one and the paid amount otherwise."""
+    with connect() as conn:
+        student = finance.transaction_lock(conn, payload.studentId)
+        previous = finance.replay(conn, payload)
+        if previous:
+            return previous
+        invoice = conn.execute("SELECT * FROM invoices WHERE student_id = ? AND period = ?", (payload.studentId, payload.period)).fetchone()
+        created_invoice = False
+        if invoice and invoice["voided_at"]:
+            raise HTTPException(409, f"The {payload.period} invoice was voided. Restore it in Tuition & Payments before recording a payment.")
+        if not invoice:
+            plan = conn.execute("SELECT * FROM billing_plans WHERE student_id = ?", (payload.studentId,)).fetchone()
+            cents = int(payload.amount * 100)
+            amount_cents = max(plan["amount_cents"], cents) if plan else cents
+            year, month = (int(part) for part in payload.period.split("-"))
+            due_day = plan["due_day"] if plan else 1
+            due = date(year, month, min(due_day, monthrange(year, month)[1])).isoformat()
+            invoice_id = str(uuid4())
+            conn.execute("INSERT INTO invoices(id, student_id, period, amount_cents, due_date, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                         (invoice_id, payload.studentId, payload.period, amount_cents, due, finance.now()))
+            finance.audit_in_transaction(conn, "invoice.created", {"actorId": user["id"], "invoiceId": invoice_id, "source": "ledger"})
+            invoice = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+            created_invoice = True
+        payment_id = insert_payment(conn, user, student, invoice, payload)
+        result = {"id": payment_id, "invoiceId": invoice["id"], "invoiceCreated": created_invoice}
         finance.remember(conn, payload, result)
     return result
 

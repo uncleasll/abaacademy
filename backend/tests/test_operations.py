@@ -120,3 +120,47 @@ class OperationsTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LedgerEntryTest(unittest.TestCase):
+    setUpClass = classmethod(auth_tests.TeacherAuthTest.setUpClass.__func__)
+    tearDownClass = classmethod(auth_tests.TeacherAuthTest.tearDownClass.__func__)
+    start_server = classmethod(auth_tests.TeacherAuthTest.start_server.__func__)
+    call = classmethod(auth_tests.TeacherAuthTest.call.__func__)
+
+    def test_ledger_entry_creates_the_month_invoice_when_missing(self):
+        tokens = {}
+        for who in ('support', 'accounting', 'firuz'):
+            code, login = self.call('/api/auth/login', dict(email=who + '@abacademypa.com', password=self.password))
+            code, changed = self.call('/api/auth/change-password', dict(currentPassword=self.password, newPassword='Updated-local-password-123'), login['token'])
+            self.assertEqual(code, 200)
+            tokens[who] = changed['token']
+        support, finance = tokens['support'], tokens['accounting']
+        app = dict(name='Ledger Child', age=8, parentName='Parent', parentSurname='One', phone='9', address='A', teacher='Firuz', klass='Existing class', program='Hifz', intakeMode='enroll')
+        self.assertEqual(self.call('/api/applications', app, support)[0], 201)
+        sid = self.call('/api/bootstrap', token=finance)[1]['students'][0]['id']
+        today = date.today().isoformat()
+        entry = dict(requestId=str(uuid4()), studentId=sid, period='2026-09', amount='600', method='zeffy', paidOn=today, reference='Z1', note='')
+        self.assertEqual(self.call('/api/finance/ledger-entries', entry, tokens['firuz'])[0], 403)
+        # No plan yet: the invoice takes the paid amount.
+        code, first = self.call('/api/finance/ledger-entries', entry, finance)
+        self.assertEqual((code, first['invoiceCreated']), (201, True))
+        self.assertEqual(self.call('/api/finance/ledger-entries', entry, finance)[1]['id'], first['id'])
+        data = self.call('/api/bootstrap', token=finance)[1]
+        sept = next(i for i in data['invoices'] if i['period'] == '2026-09')
+        self.assertEqual((sept['amount'], sept['paid'], sept['status']), (600, 600, 'paid'))
+        # With a plan, a partial payment creates the full monthly invoice and leaves a balance.
+        plan = dict(studentId=sid, amount='600', startMonth='2026-09', endMonth='2027-06', dueDay=5, active=True)
+        self.assertEqual(self.call('/api/finance/billing-plan', plan, finance, 'PUT')[0], 200)
+        partial = {**entry, 'requestId': str(uuid4()), 'period': '2027-03', 'amount': '250'}
+        self.assertEqual(self.call('/api/finance/ledger-entries', partial, finance)[0], 201)
+        data = self.call('/api/bootstrap', token=finance)[1]
+        march = next(i for i in data['invoices'] if i['period'] == '2027-03')
+        self.assertEqual((march['amount'], march['paid'], march['balance'], march['dueDate']), (600, 250, 350, '2027-03-05'))
+        # The second row for the same month settles it; a third would overpay.
+        self.assertEqual(self.call('/api/finance/ledger-entries', {**partial, 'requestId': str(uuid4()), 'amount': '350'}, finance)[0], 201)
+        code, body = self.call('/api/finance/ledger-entries', {**partial, 'requestId': str(uuid4()), 'amount': '1'}, finance)
+        self.assertEqual(code, 409)
+        self.assertIn('2027-03', body['detail'])
+        self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-13'}, finance)[0], 422)
+        self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-10', 'paidOn': '2099-01-01'}, finance)[0], 422)

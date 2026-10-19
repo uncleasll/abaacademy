@@ -1,4 +1,4 @@
-import type { Invoice, Payment, BillingPlan, PaymentInput, InvoiceInput } from "./financeTypes";
+import type { Invoice, Payment, BillingPlan, PaymentInput, InvoiceInput, LedgerEntryInput } from "./financeTypes";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   type Application,
@@ -69,6 +69,7 @@ interface AcademyStore extends BootstrapData {
   transferStudent: (id: string, groupId: string) => Promise<void>;
   recordPayment: (payload: PaymentInput) => Promise<void>;
   createInvoice: (payload: InvoiceInput) => Promise<void>;
+  recordLedgerEntry: (payload: LedgerEntryInput) => Promise<void>;
   adjustInvoice: (id: string, payload: { amount: string; dueDate?: string; reason: string }) => Promise<void>;
   voidInvoice: (id: string, reason: string) => Promise<void>;
   saveBillingPlan: (payload: BillingPlan) => Promise<void>;
@@ -342,6 +343,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     const transferStudent: AcademyStore["transferStudent"] = (id, groupId) => done(mutate(`/api/students/${id}/placement`, { groupId }, "PUT"));
     const recordPayment: AcademyStore["recordPayment"] = payload => done(mutate("/api/finance/payments", payload, "POST", true));
     const createInvoice: AcademyStore["createInvoice"] = payload => done(mutate("/api/finance/invoices", payload, "POST", true));
+    const recordLedgerEntry: AcademyStore["recordLedgerEntry"] = payload => done(mutate("/api/finance/ledger-entries", payload, "POST", true));
     const adjustInvoice: AcademyStore["adjustInvoice"] = (id, payload) => done(mutate(`/api/finance/invoices/${id}`, payload, "PATCH"));
     const voidInvoice: AcademyStore["voidInvoice"] = (id, reason) => done(mutate(`/api/finance/invoices/${id}/void`, { reason }));
     const saveBillingPlan: AcademyStore["saveBillingPlan"] = payload => done(mutate("/api/finance/billing-plan", payload, "PUT"));
@@ -416,7 +418,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     return {
       ...data,
       editStaff, resetStaffPassword, saveGroup, testGroupTelegram, transferStudent,
-      recordPayment, createInvoice, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, saveSchedule,
+      recordPayment, createInvoice, recordLedgerEntry, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, saveSchedule,
       loading,
       authLoading,
       apiOnline,

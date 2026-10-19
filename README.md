@@ -152,3 +152,12 @@ Setup, once per group:
 3. Press **Send test message** to confirm the bot can post there.
 
 Notes: a Telegram failure never blocks saving a class; the teacher sees that the post failed and can save again to resend. Leave the chat ID empty to turn posting off for a group. `TELEGRAM_ACADEMY_NAME` (default `Al-Bukhari Academy`) sets the name in the post header. Turn off the old Apps Script trigger once a group is connected, otherwise parents receive two posts.
+
+## Payments matrix (tuition ledger)
+
+**Finance → Payments Matrix** mirrors the finance team's spreadsheet workflow: one ledger of received payments and a student × month grid built from it.
+
+- **Record a payment** works like a ledger row: transaction date, student, the month it pays for, amount, method, reference. It calls `POST /api/finance/ledger-entries`, which creates that month's invoice when it does not exist yet (the billing-plan amount when the student has a plan, otherwise the paid amount) and then records the receipt. Idempotent through `requestId`, so a double click or retry never duplicates a payment.
+- **Matrix** columns run September–June of the selected school year. Green = month fully paid, amber = partly paid, red = unpaid and past due, "—" = billed but nothing received. Clicking a cell pre-fills the form for that student and month. The progress bar compares money received with the expected year (plan amount × 10 months, never less than what was billed); students without a plan use $600/month for the estimate and are marked "no plan".
+- **Transactions ledger** lists every payment of the school year with a "Correct" (void) action. Both the matrix and the ledger export to CSV in the spreadsheet's column layout.
+- Archived (terminated) students are hidden by default and can be shown with a checkbox.
