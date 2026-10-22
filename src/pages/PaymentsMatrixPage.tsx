@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { FileDown, Plus, Search } from "lucide-react";
 import { SectionTitle } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
-import { localToday, usd, type Invoice, type Payment } from "../data/financeTypes";
+import { localToday, usd, studentCode, PAYMENT_METHODS, type Invoice, type Payment } from "../data/financeTypes";
 import { downloadCsv } from "../utils/exportCsv";
 
 // The academic year runs September through June, matching the finance team's spreadsheet.
@@ -48,7 +48,7 @@ export function PaymentsMatrixPage() {
     const needle = query.trim().toLowerCase();
     return students
       .filter((student) => showArchived || student.enrollmentStatus !== "terminated")
-      .filter((student) => !needle || `${student.name} ${student.parentName} ${student.parentPhone} ${student.klass}`.toLowerCase().includes(needle))
+      .filter((student) => !needle || `${student.name} ${studentCode(student)} ${student.parentName} ${student.parentPhone} ${student.klass}`.toLowerCase().includes(needle))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((student) => {
         const cells: Cell[] = periods.map((period) => {
@@ -84,6 +84,8 @@ export function PaymentsMatrixPage() {
     finally { setBusy(false); }
   };
 
+  const draftStudent = students.find((student) => student.id === draft.studentId);
+
   const pickCell = (studentId: string, period: string, cell: Cell) => {
     const remaining = cell.invoice ? cell.invoice.balance : billingPlans.find((item) => item.studentId === studentId)?.amount ?? DEFAULT_MONTHLY_TUITION;
     setDraft({ studentId, period, amount: remaining > 0 ? remaining.toFixed(2) : "" });
@@ -93,12 +95,12 @@ export function PaymentsMatrixPage() {
 
   const exportMatrix = () => {
     downloadCsv(`tuition-matrix-${startYear}-${startYear + 1}.csv`, [
-      ["Student", "Parent", "Phone", "Group", ...MONTH_LABELS, "Paid to date", "Expected", "Progress"],
+      ["Student ID", "Student", "Parent", "Phone", "Group", ...MONTH_LABELS, "Paid to date", "Expected", "Progress"],
       ...rows.map((row) => [
-        row.student.name, row.student.parentName, row.student.parentPhone, row.student.klass,
+        studentCode(row.student), row.student.name, row.student.parentName, row.student.parentPhone, row.student.klass,
         ...row.cells.map((cell) => cell.paid), row.paidTotal, row.expected, `${Math.round((row.paidTotal / row.expected) * 100)}%`,
       ]),
-      ["Total", "", "", "", ...columnTotals, grandPaid, grandExpected, grandExpected ? `${Math.round((grandPaid / grandExpected) * 100)}%` : ""],
+      ["Total", "", "", "", "", ...columnTotals, grandPaid, grandExpected, grandExpected ? `${Math.round((grandPaid / grandExpected) * 100)}%` : ""],
     ]);
   };
 
@@ -139,7 +141,7 @@ export function PaymentsMatrixPage() {
     <section id="ledger-entry-form" className="rounded-xl border border-line bg-white p-5">
       <h2 className="flex items-center gap-2 font-bold"><Plus size={18} /> Record a payment</h2>
       <p className="mt-1 text-sm text-ink/50">Date received, student, the month it pays for, and the amount — like a row in the ledger. The month's invoice is created automatically if it does not exist yet.</p>
-      <form className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(event) => {
+      <form className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const payload = {
@@ -153,17 +155,18 @@ export function PaymentsMatrixPage() {
         <label className="text-sm">Transaction date<input name="paidOn" type="date" required defaultValue={localToday()} max={localToday()} className={input} disabled={busy} /></label>
         <label className="text-sm">Student<select required value={draft.studentId} onChange={(event) => setDraft({ ...draft, studentId: event.target.value })} className={input} disabled={busy}>
           <option value="">Select a student</option>
-          {students.filter((student) => student.enrollmentStatus !== "terminated").sort((a, b) => a.name.localeCompare(b.name)).map((student) => <option key={student.id} value={student.id}>{student.name} · {student.parentName}</option>)}
+          {students.filter((student) => student.enrollmentStatus !== "terminated").sort((a, b) => a.name.localeCompare(b.name)).map((student) => <option key={student.id} value={student.id}>{student.name}{studentCode(student) ? ` (${studentCode(student)})` : ""}</option>)}
         </select></label>
+        <div className="text-sm">Parent name<p className={`${input} bg-cream/60 text-ink/70`}>{draftStudent ? `${draftStudent.parentName} · ${draftStudent.parentPhone}` : "Fills in automatically"}</p></div>
         <label className="text-sm">Payment for month<select required value={draft.period} onChange={(event) => setDraft({ ...draft, period: event.target.value })} className={input} disabled={busy}>
           <option value="">Select a month</option>
           {periods.map((period) => <option key={period} value={period}>{monthLabel(period)}</option>)}
         </select></label>
         <label className="text-sm">Amount paid (USD)<input type="number" required min="0.01" max="100000" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} className={input} disabled={busy} /></label>
-        <label className="text-sm">Method<select name="method" className={input} disabled={busy}><option value="zeffy">Zeffy</option><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option><option value="check">Check</option><option value="card_external">Other card payment</option></select></label>
-        <label className="text-sm">Reference<input name="reference" maxLength={200} placeholder="Zeffy, bank or check reference" className={input} disabled={busy} /></label>
+        <label className="text-sm">Method<select name="method" className={input} disabled={busy}>{PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+        <label className="text-sm lg:col-span-2">Reference<input name="reference" maxLength={200} placeholder="Zelle, Zeffy, bank or check reference" className={input} disabled={busy} /></label>
         <label className="text-sm lg:col-span-2">Note<input name="note" maxLength={1000} className={input} disabled={busy} /></label>
-        <button className={`${button} sm:col-span-2 lg:col-span-4`} disabled={busy || !draft.studentId || !draft.period || !draft.amount}>{busy ? "Saving…" : "Record payment"}</button>
+        <button className={`${button} sm:col-span-2 lg:col-span-5`} disabled={busy || !draft.studentId || !draft.period || !draft.amount}>{busy ? "Saving…" : "Record payment"}</button>
       </form>
     </section>
 
@@ -189,6 +192,7 @@ export function PaymentsMatrixPage() {
                 <td className="px-4 py-3 text-ink/45">{index + 1}</td>
                 <td className="whitespace-nowrap px-4 py-3">
                   <span className="font-semibold">{row.student.name}</span>
+                  {studentCode(row.student) && <span className="ml-2 text-xs text-ink/45">{studentCode(row.student)}</span>}
                   {row.student.enrollmentStatus === "terminated" && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-ink/55">archived</span>}
                   <span className="block text-xs text-ink/45">{row.student.parentName} · {row.student.parentPhone}</span>
                 </td>

@@ -8,6 +8,8 @@ export type QuarterKey = "Q1" | "Q2" | "Q3" | "Final";
 
 export interface Student {
   id: string;
+  /** Permanent academy number, shown as ABA-0001. */
+  studentNumber?: number | null;
   name: string;
   age: number;
   parentName: string;

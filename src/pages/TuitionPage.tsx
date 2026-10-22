@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CreditCard, FileDown, Search } from 'lucide-react';
 import { useAcademy } from '../data/academyStore';
-import { localToday, usd, type BillingPlan, type Invoice, type Payment } from '../data/financeTypes';
+import { localToday, usd, studentCode, PAYMENT_METHODS, type BillingPlan, type Invoice, type Payment } from '../data/financeTypes';
 import { downloadCsv } from '../utils/exportCsv';
 import { SectionTitle } from '../components/ui';
 
@@ -16,7 +16,7 @@ export function TuitionPage() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const selected = students.find(s => s.id === selectedId);
-  const visible = students.filter(s => `${s.name} ${s.parentName} ${s.parentPhone} ${s.klass}`.toLowerCase().includes(query.toLowerCase()));
+  const visible = students.filter(s => `${s.name} ${studentCode(s)} ${s.parentName} ${s.parentPhone} ${s.klass}`.toLowerCase().includes(query.toLowerCase()));
   const run = async (action: () => Promise<void>, message: string) => {
     if (busy) return;
     setBusy(true); setError(''); setNotice('');
@@ -39,7 +39,7 @@ export function TuitionPage() {
         </label>
         <div className="mt-3 max-h-[650px] space-y-2 overflow-y-auto">
           {visible.map(s => <button key={s.id} disabled={busy} onClick={() => { setSelectedId(s.id); setError(''); setNotice(''); }} className={`w-full rounded-lg border p-3 text-left ${selectedId === s.id ? 'border-green-800 bg-green-50' : 'border-line hover:bg-cream'}`}>
-            <p className="font-semibold">{s.name}</p><p className="mt-1 text-xs text-ink/60">{s.parentName} · {s.parentPhone}</p>
+            <p className="font-semibold">{s.name} <span className="ml-1 text-xs font-normal text-ink/45">{studentCode(s)}</span></p><p className="mt-1 text-xs text-ink/60">{s.parentName} · {s.parentPhone}</p>
             <p className="mt-2 text-sm">{s.billingConfigured ? `${usd.format(s.amountDue)} outstanding` : 'Billing not set up'} <span className="text-xs text-ink/50">· {s.klass}</span></p>
           </button>)}
           {!visible.length && <p className="py-8 text-sm text-ink/50">No students found. Accepted applications appear here automatically.</p>}
@@ -47,7 +47,7 @@ export function TuitionPage() {
       </section>
       {selected ? <div className="space-y-5">
         <section className="rounded-xl bg-green-900 p-5 text-cream">
-          <p className="text-xs uppercase text-gold-300">Student & family</p><h2 className="mt-1 text-xl font-bold">{selected.name}</h2>
+          <p className="text-xs uppercase text-gold-300">Student & family · {studentCode(selected) || 'no ID yet'}</p><h2 className="mt-1 text-xl font-bold">{selected.name}</h2>
           <p className="mt-2">{selected.parentName} · {selected.parentPhone}</p><p className="mt-1 text-sm text-cream/70">{selected.klass} · {selected.teacher}</p>
           <p className="mt-4 text-2xl font-bold">{usd.format(selected.amountDue)} <span className="text-sm font-normal">outstanding</span></p>
         </section>
@@ -91,7 +91,7 @@ function PaymentForm({ studentId, busy, run, submit }: { studentId: string; busy
     {invoice ? <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void run(async () => { await submit({ studentId, invoiceId: invoice.id, amount: value, method: String(f.get('method')), paidOn: String(f.get('paidOn')), reference: String(f.get('reference')), note: String(f.get('note')) }); setAmount(''); }, 'Payment received. Parent record, balance, monthly totals and receipt updated.'); }}>
       <label className="text-sm">Invoice<select aria-label="Invoice" className={input} value={invoice.id} disabled={busy} onChange={e => { setChosen(e.target.value); setAmount(''); }}>{open.map(i => <option key={i.id} value={i.id}>{i.period} — {usd.format(i.balance)} remaining</option>)}</select></label>
       <label className="text-sm">Received amount (USD)<input className={input} type="number" required min="0.01" max={invoice.balance} step="0.01" value={value} disabled={busy} onChange={e => setAmount(e.target.value)} /></label>
-      <label className="text-sm">Payment method<select name="method" className={input} disabled={busy}><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option><option value="check">Check</option><option value="zeffy">Zeffy</option><option value="card_external">Other external card payment</option></select></label>
+      <label className="text-sm">Payment method<select name="method" className={input} disabled={busy}>{PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
       <label className="text-sm">Payment date<input name="paidOn" className={input} type="date" required defaultValue={localToday()} max={localToday()} disabled={busy} /></label>
       <label className="text-sm">Transaction / reference ID<input name="reference" className={input} maxLength={200} placeholder="Zeffy, bank or check reference" disabled={busy} /></label>
       <label className="text-sm">Note<input name="note" className={input} maxLength={1000} disabled={busy} /></label>

@@ -66,13 +66,36 @@ def startup() -> None:
     provision_from_env()
     enforce_staff_access()
     provision_teacher_groups()
+    assign_student_numbers()
     telegram.init_telegram()
+
+
+def assign_student_numbers() -> None:
+    """Every student keeps one permanent number (shown as ABA-0001) that never changes with renames or transfers."""
+    with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS students_number_idx ON students(student_number)")
+        missing = conn.execute("SELECT id FROM students WHERE student_number IS NULL ORDER BY rank, joined_date, id").fetchall()
+        if not missing:
+            return
+        start = conn.execute("SELECT COALESCE(MAX(student_number), 0) AS n FROM students").fetchone()["n"]
+        for offset, row in enumerate(missing, start=1):
+            conn.execute("UPDATE students SET student_number = ? WHERE id = ?", (start + offset, row["id"]))
+
+
+def next_student_number(conn) -> int:
+    if conn.postgres:
+        # Serialise enrolments so two registrations cannot pick the same number.
+        conn.execute("LOCK TABLE students IN SHARE ROW EXCLUSIVE MODE")
+    return conn.execute("SELECT COALESCE(MAX(student_number), 0) + 1 AS n FROM students").fetchone()["n"]
 
 
 def student_row(row):
     data = dict(row)
     return {
         "id": data["id"],
+        "studentNumber": data.get("student_number"),
         "name": data["name"],
         "age": data["age"],
         "parentName": data["parent_name"],
@@ -231,6 +254,7 @@ def enroll_accepted_application(conn, application) -> None:
         return
     validate_placement(conn, application["klass"], application["teacher"], require_seat=True)
     next_rank = conn.execute("SELECT COALESCE(MAX(rank), 0) + 1 AS rank FROM students").fetchone()["rank"]
+    number = next_student_number(conn)
     student_id = f"s-{uuid4().hex[:10]}"
     parent_name = f"{application['parent_name']} {application['parent_surname']}".strip()
     conn.execute(
@@ -238,8 +262,8 @@ def enroll_accepted_application(conn, application) -> None:
         INSERT INTO students
         (id, name, age, parent_name, parent_phone, address, klass, teacher, stars, hw, attendance,
          next_hw, attendance_pct, performance, homework_avg, overall, status, rank, tuition_status, amount_due,
-         joined_date, enrollment_status, finance_note, termination_note)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'not_done', 'absent', '', 0, 0, 0, 0, 'Good', ?, 'paid', 0, ?, 'active', '', '')
+         joined_date, enrollment_status, finance_note, termination_note, student_number)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'not_done', 'absent', '', 0, 0, 0, 0, 'Good', ?, 'paid', 0, ?, 'active', '', '', ?)
         """,
         (
             student_id,
@@ -252,6 +276,7 @@ def enroll_accepted_application(conn, application) -> None:
             application["teacher"],
             next_rank,
             academy_today().isoformat(),
+            number,
         ),
     )
 
@@ -824,6 +849,11 @@ def delete_meeting(meeting_id: str, user=Depends(require_roles("IT Admin", "Regi
     return None
 
 
+def student_code(student: dict) -> str:
+    number = student.get("studentNumber")
+    return f"ABA-{number:04d}" if number else ""
+
+
 def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingResponse:
     output = io.StringIO()
     fieldnames = list(rows[0].keys()) if rows else ["message"]
@@ -846,7 +876,7 @@ def csv_response(filename: str, rows: list[dict[str, object]]) -> StreamingRespo
 def finance_export(user=Depends(require_roles("IT Admin", "Finance"))):
     data = bootstrap(user)
     people = {s["id"]: s for s in data["students"]}
-    rows = [dict(student=people[i["studentId"]]["name"], parent=people[i["studentId"]]["parentName"],
+    rows = [dict(student_id=student_code(people[i["studentId"]]), student=people[i["studentId"]]["name"], parent=people[i["studentId"]]["parentName"],
                  phone=people[i["studentId"]]["parentPhone"], period=i["period"], due_date=i["dueDate"],
                  billed_usd=i["amount"], received_usd=i["paid"], balance_usd=i["balance"], status=i["status"])
             for i in data["invoices"]]

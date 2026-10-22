@@ -4,7 +4,7 @@ import { AttendancePill, PaymentPill, StatusPill } from "../components/ui";
 import { useAcademy } from "../data/academyStore";
 import type { AttendanceStatus } from "../data/mockData";
 import { downloadCsv, safeFilenamePart } from "../utils/exportCsv";
-import { usd } from "../data/financeTypes";
+import { usd, studentCode } from "../data/financeTypes";
 
 function DirectoryStat({
   label,
@@ -66,7 +66,7 @@ export function StudentsPage() {
       riskFilter === "All students" ||
       (riskFilter === "Low attendance" && (student.attendancePct < 80 || student.attendance === "absent")) ||
       (riskFilter === "Overdue tuition" && student.tuitionStatus === "overdue");
-    const matchesQuery = `${student.name} ${student.parentName} ${student.parentPhone} ${student.address} ${student.klass} ${student.teacher}`
+    const matchesQuery = `${student.name} ${studentCode(student)} ${student.parentName} ${student.parentPhone} ${student.address} ${student.klass} ${student.teacher}`
       .toLowerCase()
       .includes(query.toLowerCase());
     return matchesTeacher && matchesGroup && matchesRisk && matchesQuery;
@@ -110,6 +110,7 @@ export function StudentsPage() {
     const attendanceColumns = attendanceDates.map((date) => `Attendance ${dateLabel(date)}`);
     downloadCsv(`students-${safeFilenamePart(teacherFilter)}-${safeFilenamePart(groupFilter)}-${safeFilenamePart(riskFilter)}.csv`, [
       [
+        "Student ID",
         "Student",
         "Age",
         "Teacher",
@@ -129,6 +130,7 @@ export function StudentsPage() {
         ...attendanceColumns,
       ],
       ...sorted.map((student) => [
+        studentCode(student),
         student.name,
         student.age,
         student.teacher,
@@ -302,7 +304,7 @@ export function StudentsPage() {
                   <div className="min-w-0">
                     <h2 className="truncate text-lg font-bold text-ink">{selected.name}</h2>
                     <p className="mt-1 text-sm text-ink/45">
-                      {selected.teacher} · {selected.klass} · age {selected.age}
+                      {studentCode(selected) ? `${studentCode(selected)} · ` : ""}{selected.teacher} · {selected.klass} · age {selected.age}
                     </p>
                   </div>
                 </div>

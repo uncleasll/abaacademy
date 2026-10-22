@@ -198,6 +198,7 @@ MIGRATIONS = [
     "ALTER TABLE attendance_records ADD COLUMN status TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE invoices ADD COLUMN voided_at TEXT",
     "ALTER TABLE invoices ADD COLUMN void_reason TEXT",
+    "ALTER TABLE students ADD COLUMN student_number INTEGER",
 ]
 
 

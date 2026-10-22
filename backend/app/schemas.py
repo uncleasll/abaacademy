@@ -212,7 +212,7 @@ class PaymentCreate(BaseModel):
     studentId: str
     invoiceId: str
     amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
-    method: Literal['cash', 'bank_transfer', 'check', 'card_external', 'zeffy']
+    method: Literal['cash', 'zelle', 'zeffy', 'bank_transfer', 'check', 'card_external']
     paidOn: date
     reference: str = Field(default='', max_length=200)
     note: str = Field(default='', max_length=1000)
@@ -230,7 +230,7 @@ class LedgerEntryCreate(BaseModel):
     studentId: str
     period: str = Field(pattern=r'^20\d{2}-(0[1-9]|1[0-2])$')
     amount: Decimal = Field(gt=0, le=100000, decimal_places=2)
-    method: Literal['cash', 'bank_transfer', 'check', 'card_external', 'zeffy']
+    method: Literal['cash', 'zelle', 'zeffy', 'bank_transfer', 'check', 'card_external']
     paidOn: date
     reference: str = Field(default='', max_length=200)
     note: str = Field(default='', max_length=1000)

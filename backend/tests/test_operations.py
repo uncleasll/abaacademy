@@ -25,6 +25,10 @@ class OperationsTest(unittest.TestCase):
             self.assertEqual(self.call('/api/applications', {**base, 'name': name, 'phone': phone}, support)[0], 201)
         students = self.call('/api/bootstrap', token=firuz)[1]['students']
         one, two = (next(s for s in students if s['name'] == name) for name in ('Child One', 'Child Two'))
+        # Permanent, unique, sequential student numbers survive restarts.
+        self.assertEqual(sorted(s['studentNumber'] for s in students), [1, 2])
+        self.process.terminate(); self.process.wait(timeout=10); self.start_server()
+        self.assertEqual({s['id']: s['studentNumber'] for s in self.call('/api/bootstrap', token=firuz)[1]['students']}, {one['id']: one['studentNumber'], two['id']: two['studentNumber']})
         today = date.today().isoformat()
 
         # One atomic request saves the whole class, and "late" survives the attendance summary.
@@ -163,4 +167,6 @@ class LedgerEntryTest(unittest.TestCase):
         self.assertEqual(code, 409)
         self.assertIn('2027-03', body['detail'])
         self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-13'}, finance)[0], 422)
+        self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-11', 'method': 'zelle'}, finance)[0], 201)
+        self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-12', 'method': 'paypal'}, finance)[0], 422)
         self.assertEqual(self.call('/api/finance/ledger-entries', {**entry, 'requestId': str(uuid4()), 'period': '2026-10', 'paidOn': '2099-01-01'}, finance)[0], 422)
