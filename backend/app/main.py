@@ -1136,6 +1136,15 @@ def test_group_telegram(group_id: str, user=Depends(require_roles("IT Admin", "R
     return {"ok": True}
 
 
+@app.post("/api/telegram/catch-up")
+def telegram_catch_up(user=Depends(require_roles("IT Admin", "Registration"))):
+    """Link any unlinked real class chats and post recent class days that never reached Telegram."""
+    linked = telegram.provision_group_chats()
+    posts = telegram.catch_up_missing_posts()
+    audit("telegram.catch_up", {"actorId": user["id"], "linked": len(linked), "posts": len(posts)})
+    return {"ok": True, "linked": linked, "telegram": posts}
+
+
 def save_group(group_id, payload, user):
     if len(payload.name.strip()) < 2 or len(payload.program.strip()) < 2:
         raise HTTPException(422, "Group name and program must contain at least two characters")

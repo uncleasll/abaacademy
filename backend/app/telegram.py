@@ -4,18 +4,35 @@ import html
 import json
 import logging
 import os
-from datetime import date
+import re
+import threading
+import time
+from datetime import date, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import HTTPException
 
+from .clock import academy_today
 from .database import connect
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 API_BASE = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org").strip().rstrip("/")
 ACADEMY_NAME = os.getenv("TELEGRAM_ACADEMY_NAME", "Al-Bukhari Academy").strip() or "Al-Bukhari Academy"
 logger = logging.getLogger("aba.telegram")
+
+# The academy's real class chats, carried over from the earlier spreadsheet bot: teacher → chat ids for G1, G2, ...
+# TELEGRAM_GROUP_CHATS_JSON (same shape) replaces this list; "{}" turns automatic linking off.
+DEFAULT_GROUP_CHATS: dict[str, list[str]] = {
+    "Behzodjon": ["-1003382996965", "-1003680113409"],
+    "Abdulquddus": ["-1003546618513", "-1003540540449"],
+    "Firuz": ["-1003406651107"],
+    "Adhamjon": ["-1003746564495"],
+    "Abdulwahid": ["-1003764772695"],
+}
+# How often the server re-sends class days whose post never reached Telegram (0 disables the background check).
+CATCHUP_SECONDS = int(os.getenv("TELEGRAM_CATCHUP_SECONDS", "1800") or 0)
+CATCHUP_DAYS = 3
 
 
 def _call(method: str, payload: dict) -> dict:
@@ -50,6 +67,110 @@ def init_telegram() -> None:
                 secured = conn.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(?)", (table,)).fetchone()
                 if not secured or not secured["relrowsecurity"]:
                     conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+    provision_group_chats()
+    start_catchup_thread()
+
+
+def configured_group_chats() -> dict[str, list[str]]:
+    raw = os.getenv("TELEGRAM_GROUP_CHATS_JSON", "").strip()
+    if not raw:
+        return DEFAULT_GROUP_CHATS
+    try:
+        parsed = json.loads(raw)
+        return {str(teacher): [str(chat) for chat in chats] for teacher, chats in parsed.items()}
+    except (ValueError, AttributeError, TypeError):
+        logger.error("TELEGRAM_GROUP_CHATS_JSON is not valid JSON; keeping the saved chat links only")
+        return {}
+
+
+def provision_group_chats() -> list[dict]:
+    """Link each teacher's groups to their real Telegram chats once, so posting works without manual setup.
+
+    A chat saved by staff is never overwritten, a chat already linked to another group is never linked twice,
+    and a teacher who has fewer groups than chats gets the missing group created (editable on the Groups page).
+    """
+    linked: list[dict] = []
+    with connect() as conn:
+        if not conn.postgres:
+            conn.execute("BEGIN IMMEDIATE")
+        used = {row["chat_id"] for row in conn.execute("SELECT chat_id FROM group_telegram").fetchall()}
+        for teacher, chats in configured_group_chats().items():
+            groups = [dict(row) for row in conn.execute("SELECT id, name FROM class_groups WHERE teacher=? ORDER BY name", (teacher,)).fetchall()]
+            slots: dict[int, dict] = {}
+            unnumbered = []
+            for group in groups:
+                match = re.search(r"\bG\s?(\d+)\b", group["name"])
+                index = int(match.group(1)) - 1 if match else None
+                if index is not None and index not in slots:
+                    slots[index] = group
+                else:
+                    unnumbered.append(group)
+            # The provisioned "<Teacher> — General" group comes first among unnamed groups, then the rest by name.
+            unnumbered.sort(key=lambda g: (not g["id"].startswith("group-"), g["name"]))
+            for index in range(len(chats)):
+                if index not in slots and unnumbered:
+                    slots[index] = unnumbered.pop(0)
+            for index, chat_id in enumerate(chats):
+                if not chat_id or chat_id in used:
+                    continue
+                group = slots.get(index)
+                if group is None:
+                    group = {"id": f"group-{teacher.lower()}-g{index + 1}", "name": f"{teacher} — G{index + 1}"}
+                    if conn.execute("SELECT 1 FROM class_groups WHERE id=? OR name=?", (group["id"], group["name"])).fetchone():
+                        continue
+                    conn.execute("INSERT INTO class_groups VALUES (?, ?, ?, ?, ?, ?, 0)",
+                                 (group["id"], group["name"], teacher, "General", "Schedule not set", 30))
+                if conn.execute("SELECT 1 FROM group_telegram WHERE group_id=?", (group["id"],)).fetchone():
+                    continue
+                conn.execute("INSERT INTO group_telegram(group_id, chat_id) VALUES (?, ?)", (group["id"], chat_id))
+                used.add(chat_id)
+                linked.append({"group": group["name"], "chatId": chat_id})
+    for item in linked:
+        logger.info("Linked Telegram chat %s to group %s", item["chatId"], item["group"])
+    return linked
+
+
+def catch_up_missing_posts(days: int = CATCHUP_DAYS) -> list[dict]:
+    """Post every recent class day that has attendance but no Telegram post yet (Telegram was down, or the chat was linked later)."""
+    today = academy_today()
+    since = (today - timedelta(days=days)).isoformat()
+    with connect() as conn:
+        pending = conn.execute(
+            """SELECT DISTINCT g.id, g.name, a.date FROM class_groups g
+               JOIN group_telegram t ON t.group_id = g.id
+               JOIN students s ON s.klass = g.name AND s.enrollment_status = 'active'
+               JOIN attendance_records a ON a.student_id = s.id
+               LEFT JOIN telegram_class_posts p ON p.group_id = g.id AND p.date = a.date
+               WHERE a.date >= ? AND a.date <= ? AND p.group_id IS NULL ORDER BY a.date, g.name""",
+            (since, today.isoformat())).fetchall()
+    results = []
+    for row in pending:
+        result = post_class_attendance(row["id"], row["name"], row["date"])
+        results.append({**result, "date": row["date"]})
+    return results
+
+
+_catchup_started = False
+
+
+def start_catchup_thread() -> None:
+    global _catchup_started
+    if _catchup_started or CATCHUP_SECONDS <= 0 or not BOT_TOKEN:
+        return
+    _catchup_started = True
+
+    def loop() -> None:
+        # The first pass runs shortly after startup so a redeploy never leaves a class day unposted.
+        time.sleep(min(60, CATCHUP_SECONDS))
+        while True:
+            try:
+                for item in catch_up_missing_posts():
+                    logger.info("Catch-up post for %s on %s: %s", item["group"], item["date"], item["status"])
+            except Exception:  # pragma: no cover - the background loop must survive any database or network error
+                logger.exception("Telegram catch-up failed")
+            time.sleep(CATCHUP_SECONDS)
+
+    threading.Thread(target=loop, name="telegram-catchup", daemon=True).start()
 ATTENDANCE_ORDER = {"present": 1, "late": 2, "absent": 3}
 HOMEWORK_LABELS = {"done": "Done", "partial": "Partial", "not_done": "Not done"}
 DIVIDER = "──────────────────"

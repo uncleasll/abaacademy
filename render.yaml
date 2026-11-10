@@ -28,3 +28,5 @@ services:
         sync: false
       - key: TELEGRAM_ACADEMY_NAME
         value: Al-Bukhari Academy
+      - key: TELEGRAM_CATCHUP_SECONDS
+        value: "1800"

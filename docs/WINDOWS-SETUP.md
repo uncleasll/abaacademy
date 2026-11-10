@@ -272,7 +272,7 @@ Backup'dan tiklash (kerak bo'lganda):
 
 ## 11-bosqich. Telegram davomat guruhlari (5 daqiqa)
 
-Saytga `admin@` bilan kiring → Groups & Placement → har bir guruhga Telegram chat ID kiriting → Save → **Send test message**. Chat ID'lar eski skriptdagi ro'yxatda.
+Yettita real guruh chat ID'si dasturga kiritilgan: server ishga tushganda har bir ustozning guruhlariga o'zi ulaydi (`TELEGRAM_BOT_TOKEN` yetarli). Tekshirish: saytga `admin@` bilan kiring → Groups & Placement → guruhda "Telegram attendance on" turibdimi → **Send test message**. Boshqa chat kerak bo'lsa shu sahifada ID'ni o'zgartiring; qo'lda kiritilgan ID hech qachon ustidan yozilmaydi. Ustoz davomatni saqlaganda post darhol ketadi; ketmay qolgani har 30 daqiqada qayta urinadi.
 
 ---
 

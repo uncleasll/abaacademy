@@ -68,6 +68,22 @@ Configure the existing Render service with:
 - `STAFF_ACCOUNTS_JSON`: the full contents of `backend/private/teachers-bootstrap.json`.
 - `TELEGRAM_BOT_TOKEN`: the attendance bot token from BotFather.
 - `TELEGRAM_ACADEMY_NAME`: the academy name shown in daily attendance posts.
+- `TELEGRAM_CATCHUP_SECONDS` (optional, default 1800): how often unposted class days are re-sent; `0` disables it.
+- `TELEGRAM_GROUP_CHATS_JSON` (optional): overrides the built-in class chat list described below.
+
+## Telegram attendance posts
+
+The seven real class chats from the academy's earlier spreadsheet bot are built into
+`backend/app/telegram.py` (teacher → chat ids for G1, G2, …). At startup each teacher's groups are
+linked to those chats once: a group named with `G1`/`G2` takes that slot, otherwise the provisioned
+`<Teacher> — General` group counts as G1, and a teacher with more chats than groups gets a
+`<Teacher> — G2` group created. A chat saved or cleared on the Groups page is never overwritten, and
+a chat is never linked to two groups. Only `TELEGRAM_BOT_TOKEN` must be set for posting to work.
+
+When a teacher saves a class day it is posted to the group's chat immediately, and saving the day
+again edits the same post. Every 30 minutes the server also re-sends any class day from the last
+three days that has attendance but no post (Telegram was down, or the chat was linked later).
+IT Admin and Registration can run the same check at once with `POST /api/telegram/catch-up`.
 
 `render.yaml` describes the backend using the existing Supabase database through
 `DATABASE_URL`; it does not create an additional paid database. Applying a Blueprint

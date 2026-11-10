@@ -131,3 +131,69 @@ class TelegramAttendanceTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TelegramAutoLinkTest(unittest.TestCase):
+    """Real class chats are linked at startup and unposted class days are caught up automatically."""
+    start_server = classmethod(auth_tests.TeacherAuthTest.start_server.__func__)
+    call = classmethod(auth_tests.TeacherAuthTest.call.__func__)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fake = HTTPServer(('127.0.0.1', 0), FakeTelegram)
+        threading.Thread(target=cls.fake.serve_forever, daemon=True).start()
+        auth_tests.TeacherAuthTest.setUpClass.__func__(cls)
+        cls.process.terminate(); cls.process.wait(timeout=10)
+        FakeTelegram.calls.clear()
+        cls.env.update(TELEGRAM_BOT_TOKEN='test-token', TELEGRAM_API_BASE=f'http://127.0.0.1:{cls.fake.server_port}',
+                       TELEGRAM_GROUP_CHATS_JSON=json.dumps({'Firuz': ['-1003406651107'], 'Behzodjon': ['-1003382996965', '-1003680113409']}),
+                       TELEGRAM_CATCHUP_SECONDS='0')
+        cls.start_server()
+
+    @classmethod
+    def tearDownClass(cls):
+        auth_tests.TeacherAuthTest.tearDownClass.__func__(cls)
+        cls.fake.shutdown()
+
+    def test_startup_links_real_chats_and_catch_up_posts_missed_days(self):
+        code, login = self.call('/api/auth/login', dict(email='support@abacademypa.com', password=self.password))
+        support = self.call('/api/auth/change-password', dict(currentPassword=self.password, newPassword='Updated-local-password-123'), login['token'])[1]['token']
+        code, login = self.call('/api/auth/login', dict(email='firuz@abacademypa.com', password=self.password))
+        firuz = self.call('/api/auth/change-password', dict(currentPassword=self.password, newPassword='Updated-local-password-123'), login['token'])[1]['token']
+        groups = self.call('/api/bootstrap', token=support)[1]['classGroups']
+        by_name = {g['name']: g for g in groups}
+        # Firuz's only group took the single Firuz chat; Behzodjon got his provisioned group as G1 and a new G2 group.
+        self.assertEqual(by_name['Existing class']['telegramChatId'], '-1003406651107')
+        self.assertEqual(by_name['Behzodjon — General']['telegramChatId'], '-1003382996965')
+        self.assertEqual(by_name['Behzodjon — G2']['telegramChatId'], '-1003680113409')
+        self.assertEqual(by_name['Behzodjon — G2']['teacher'], 'Behzodjon')
+        self.assertFalse(by_name['Adhamjon — General']['telegramConnected'])
+
+        # Staff changes win: a chat cleared by staff is not re-linked, and a restart changes nothing.
+        group = by_name['Existing class']
+        edit = {k: group[k] for k in ('name', 'teacher', 'program', 'schedule', 'capacity')}
+        self.assertEqual(self.call('/api/groups/' + group['id'], {**edit, 'telegramChatId': '-1009999999999'}, support, 'PUT')[0], 200)
+        self.process.terminate(); self.process.wait(timeout=10); self.start_server()
+        groups = self.call('/api/bootstrap', token=support)[1]['classGroups']
+        self.assertEqual(next(g['telegramChatId'] for g in groups if g['name'] == 'Existing class'), '-1009999999999')
+        self.assertEqual(sum(1 for g in groups if g['teacher'] == 'Behzodjon'), 2)
+
+        # A class day saved while Telegram was down is posted by the catch-up, once.
+        base = dict(age=8, parentName='Parent', parentSurname='One', address='Address', teacher='Firuz', klass='Existing class', program='Hifz', intakeMode='enroll')
+        self.assertEqual(self.call('/api/applications', {**base, 'name': 'Zayd', 'phone': '1'}, support)[0], 201)
+        student = self.call('/api/bootstrap', token=firuz)[1]['students'][0]['id']
+        today = date.today().isoformat()
+        session = dict(date=today, entries=[dict(studentId=student, attendance='present', stars=4, hw='done', nextHw='Page 1')])
+        self.fake.shutdown(); self.fake.server_close()
+        self.assertEqual(self.call('/api/class-session', session, firuz)[1]['telegram'][0]['status'], 'failed')
+        self.fake = HTTPServer(('127.0.0.1', self.fake.server_port), FakeTelegram)
+        threading.Thread(target=self.fake.serve_forever, daemon=True).start()
+        FakeTelegram.calls.clear()
+        self.assertEqual(self.call('/api/telegram/catch-up', {}, firuz)[0], 403)
+        code, result = self.call('/api/telegram/catch-up', {}, support)
+        self.assertEqual((code, result['linked']), (200, []))
+        self.assertEqual(result['telegram'], [{'group': 'Existing class', 'date': today, 'status': 'sent'}])
+        self.assertEqual(FakeTelegram.calls[-1][1]['chat_id'], '-1009999999999')
+        self.assertIn('1. Zayd', FakeTelegram.calls[-1][1]['text'])
+        self.assertEqual(self.call('/api/telegram/catch-up', {}, support)[1]['telegram'], [])
+        self.assertEqual(len(FakeTelegram.calls), 1)
