@@ -1,4 +1,6 @@
-from datetime import date
+from datetime import date, timedelta
+import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import threading
@@ -202,3 +204,32 @@ class TelegramAutoLinkTest(unittest.TestCase):
         self.assertIn('1. Zayd', FakeTelegram.calls[-1][1]['text'])
         self.assertEqual(self.call('/api/telegram/catch-up', {}, support)[1]['telegram'], [])
         self.assertEqual(len(FakeTelegram.calls), 1)
+
+        # Daily mode: saving only schedules a new day; the daily run (or an explicit catch-up) posts it, once.
+        self.assertEqual(self.call('/api/telegram/settings', dict(mode='daily', time='25:00'), support, 'PUT')[0], 422)
+        self.assertEqual(self.call('/api/telegram/settings', dict(mode='daily', time='00:00'), firuz, 'PUT')[0], 403)
+        code, saved = self.call('/api/telegram/settings', dict(mode='daily', time='00:00'), support, 'PUT')
+        self.assertEqual((code, saved['telegramPosting']), (200, {'mode': 'daily', 'time': '00:00'}))
+        self.assertEqual(self.call('/api/bootstrap', token=firuz)[1]['telegramPosting'], {'mode': 'daily', 'time': '00:00'})
+        self.assertEqual(self.call('/api/applications', {**base, 'name': 'Umar', 'phone': '2'}, support)[0], 201)
+        umar = next(s['id'] for s in self.call('/api/bootstrap', token=firuz)[1]['students'] if s['name'] == 'Umar')
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        FakeTelegram.calls.clear()
+        posts = self.call('/api/class-session', dict(date=yesterday, entries=[dict(studentId=umar, attendance='late', stars=2, hw='partial', nextHw='')]), firuz)[1]['telegram']
+        self.assertEqual(posts, [{'group': 'Existing class', 'status': 'scheduled', 'detail': '00:00'}])
+        self.assertEqual(FakeTelegram.calls, [])
+        # A day that was already posted is still edited immediately.
+        self.assertEqual(self.call('/api/class-session', session, firuz)[1]['telegram'][0]['status'], 'updated')
+        self.assertEqual(FakeTelegram.calls[-1][0], 'editMessageText')
+        FakeTelegram.calls.clear()
+        run = subprocess.run([sys.executable, '-c', 'from app.telegram import run_daily_post_if_due; import json; print(json.dumps(run_daily_post_if_due()))'],
+                             cwd=auth_tests.BACKEND, env=self.env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout.strip().splitlines()[-1]), [{'group': 'Existing class', 'date': yesterday, 'status': 'sent'}])
+        self.assertIn('2. Umar', FakeTelegram.calls[-1][1]['text']) if '2. Umar' in FakeTelegram.calls[-1][1]['text'] else self.assertIn('Umar', FakeTelegram.calls[-1][1]['text'])
+        run = subprocess.run([sys.executable, '-c', 'from app.telegram import run_daily_post_if_due; import json; print(json.dumps(run_daily_post_if_due()))'],
+                             cwd=auth_tests.BACKEND, env=self.env, capture_output=True, text=True)
+        self.assertEqual(json.loads(run.stdout.strip().splitlines()[-1]), None)
+        self.assertEqual(len(FakeTelegram.calls), 1)
+        # Back to instant posting.
+        self.assertEqual(self.call('/api/telegram/settings', dict(mode='instant'), support, 'PUT')[1]['telegramPosting'], {'mode': 'instant', 'time': '09:30'})

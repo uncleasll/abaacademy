@@ -327,3 +327,9 @@ class GroupWrite(BaseModel):
 
 class PlacementWrite(BaseModel):
     groupId: str
+
+
+class TelegramSettingsWrite(BaseModel):
+    mode: Literal["instant", "daily"]
+    # Academy-local time of the daily run, 24-hour HH:MM.
+    time: str = Field(default="09:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")

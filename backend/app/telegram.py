@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 from fastapi import HTTPException
 
-from .clock import academy_today
+from .clock import academy_now, academy_today
 from .database import connect
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -33,6 +33,32 @@ DEFAULT_GROUP_CHATS: dict[str, list[str]] = {
 # How often the server re-sends class days whose post never reached Telegram (0 disables the background check).
 CATCHUP_SECONDS = int(os.getenv("TELEGRAM_CATCHUP_SECONDS", "1800") or 0)
 CATCHUP_DAYS = 3
+POSTING_KEY = "telegram_posting"
+DAILY_RUN_KEY = "telegram_daily_last_run"
+DEFAULT_POSTING = {"mode": "instant", "time": "09:30"}
+
+
+def read_posting_settings(conn) -> dict:
+    """How class days reach Telegram: "instant" (when the teacher saves) or "daily" (every day at a set academy-local time)."""
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (POSTING_KEY,)).fetchone()
+    settings = dict(DEFAULT_POSTING)
+    if row:
+        try:
+            saved = json.loads(row["value"])
+            if saved.get("mode") in ("instant", "daily"):
+                settings["mode"] = saved["mode"]
+            if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(saved.get("time", ""))):
+                settings["time"] = saved["time"]
+        except (ValueError, AttributeError):
+            pass
+    return settings
+
+
+def save_posting_settings(conn, mode: str, time_of_day: str) -> dict:
+    settings = {"mode": mode, "time": time_of_day}
+    conn.execute("INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (POSTING_KEY, json.dumps(settings)))
+    return settings
 
 
 def _call(method: str, payload: dict) -> dict:
@@ -155,8 +181,9 @@ def provision_group_chats() -> list[dict]:
     return linked
 
 
-def catch_up_missing_posts(days: int = CATCHUP_DAYS) -> list[dict]:
-    """Post every recent class day that has attendance but no Telegram post yet (Telegram was down, or the chat was linked later)."""
+def catch_up_missing_posts(days: int = CATCHUP_DAYS, force: bool = False) -> list[dict]:
+    """Post every recent class day that has attendance but no Telegram post yet (Telegram was down, the chat was linked later,
+    or posting is set to the daily run)."""
     today = academy_today()
     since = (today - timedelta(days=days)).isoformat()
     with connect() as conn:
@@ -170,9 +197,24 @@ def catch_up_missing_posts(days: int = CATCHUP_DAYS) -> list[dict]:
             (since, today.isoformat())).fetchall()
     results = []
     for row in pending:
-        result = post_class_attendance(row["id"], row["name"], row["date"])
+        result = post_class_attendance(row["id"], row["name"], row["date"], force=force)
         results.append({**result, "date": row["date"]})
     return results
+
+
+def run_daily_post_if_due() -> list[dict] | None:
+    """In daily mode, post all unposted class days once per day after the configured academy-local time."""
+    now = academy_now()
+    today = now.date().isoformat()
+    with connect() as conn:
+        posting = read_posting_settings(conn)
+        if posting["mode"] != "daily" or now.strftime("%H:%M") < posting["time"]:
+            return None
+        last = conn.execute("SELECT value FROM app_settings WHERE key = ?", (DAILY_RUN_KEY,)).fetchone()
+        if last and last["value"] == today:
+            return None
+        conn.execute("INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (DAILY_RUN_KEY, today))
+    return catch_up_missing_posts(force=True)
 
 
 _catchup_started = False
@@ -185,15 +227,20 @@ def start_catchup_thread() -> None:
     _catchup_started = True
 
     def loop() -> None:
-        # The first pass runs shortly after startup so a redeploy never leaves a class day unposted.
-        time.sleep(min(60, CATCHUP_SECONDS))
+        # Checks every minute: the daily run fires once after its time; in instant mode missed posts are retried every CATCHUP_SECONDS.
+        tick = min(60, CATCHUP_SECONDS)
+        next_catchup = time.monotonic() + tick
         while True:
+            time.sleep(tick)
             try:
-                for item in catch_up_missing_posts():
-                    logger.info("Catch-up post for %s on %s: %s", item["group"], item["date"], item["status"])
+                for item in run_daily_post_if_due() or []:
+                    logger.info("Daily post for %s on %s: %s", item["group"], item["date"], item["status"])
+                if time.monotonic() >= next_catchup:
+                    next_catchup = time.monotonic() + CATCHUP_SECONDS
+                    for item in catch_up_missing_posts():
+                        logger.info("Catch-up post for %s on %s: %s", item["group"], item["date"], item["status"])
             except Exception:  # pragma: no cover - the background loop must survive any database or network error
-                logger.exception("Telegram catch-up failed")
-            time.sleep(CATCHUP_SECONDS)
+                logger.exception("Telegram background posting failed")
 
     threading.Thread(target=loop, name="telegram-catchup", daemon=True).start()
 ATTENDANCE_ORDER = {"present": 1, "late": 2, "absent": 3}
@@ -224,7 +271,7 @@ def build_attendance_message(day: str, rows: list[dict]) -> str:
     return text
 
 
-def post_class_attendance(group_id: str, group_name: str, day: str) -> dict:
+def post_class_attendance(group_id: str, group_name: str, day: str, force: bool = False) -> dict:
     """Post one group's class day to its Telegram chat; saving the day again edits that same post."""
     result = {"group": group_name}
     with connect() as conn:
@@ -236,10 +283,14 @@ def post_class_attendance(group_id: str, group_name: str, day: str) -> dict:
                JOIN students s ON s.id = a.student_id
                WHERE s.klass = ? AND a.date = ? AND s.enrollment_status = 'active'""", (group_name, day)).fetchall()]
         previous = conn.execute("SELECT chat_id, message_id FROM telegram_class_posts WHERE group_id=? AND date=?", (group_id, day)).fetchone()
+        posting = read_posting_settings(conn)
     if not BOT_TOKEN:
         return {**result, "status": "failed", "detail": "Telegram bot is not configured"}
     if not rows:
         return {**result, "status": "skipped"}
+    if posting["mode"] == "daily" and not previous and not force:
+        # The daily run posts it at the configured time; a day already posted is still edited right away.
+        return {**result, "status": "scheduled", "detail": posting["time"]}
     for row in rows:
         row["attendance"] = row["status"] or ("present" if row["present"] else "absent")
     chat_id = target["chat_id"]

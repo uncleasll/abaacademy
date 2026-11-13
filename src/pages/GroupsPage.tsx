@@ -4,7 +4,7 @@ import { SectionTitle } from '../components/ui';
 import type { ClassGroup } from '../data/mockData';
 const field = 'mt-1 w-full rounded-lg border border-line bg-white p-3 text-sm';
 export function GroupsPage() {
-  const { classGroups, staffUsers, students, saveGroup, testGroupTelegram, transferStudent } = useAcademy();
+  const { classGroups, staffUsers, students, saveGroup, testGroupTelegram, transferStudent, telegramPosting, saveTelegramPosting } = useAcademy();
   const teachers = staffUsers.filter(u => u.role === 'Teacher' && u.status === 'active');
   const [editing, setEditing] = useState<ClassGroup | null>(null);
   const [notice, setNotice] = useState('Each group belongs to one teacher. Enrollment and transfers update teacher rosters automatically.');
@@ -13,6 +13,15 @@ export function GroupsPage() {
   const run = async (action: () => Promise<void>, message: string) => { setBusy(true); try { await action(); setNotice(message); } catch(e) { setNotice(e instanceof Error ? e.message : 'Could not save'); } finally { setBusy(false); } };
   return <div className="space-y-5"><SectionTitle eyebrow="Academy" title="Groups & placement" sub="Configure teacher groups, capacity and schedules. Move a student without losing their payment or attendance history." />
     <p role="status" className="rounded-lg bg-sky-50 p-3 text-sm text-sky-900">{notice}</p>
+    <form key={`${telegramPosting.mode}:${telegramPosting.time}`} className="rounded-xl border border-line bg-white p-5" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); const mode = f.get('mode') === 'daily' ? 'daily' : 'instant'; const time = String(f.get('time') || '09:30'); void run(() => saveTelegramPosting({ mode, time }), mode === 'daily' ? `Telegram posting set to once a day at ${time}. Each class day is posted the next time the clock passes ${time}.` : 'Telegram posting set to immediate: each class is posted the moment the teacher saves it.'); }}>
+      <h2 className="font-bold">When attendance is posted to Telegram</h2>
+      <p className="text-xs text-ink/50">Applies to every group. Saving a day that was already posted always updates that post right away.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="flex items-start gap-3 rounded-lg border border-line p-3 text-sm"><input type="radio" name="mode" value="instant" defaultChecked={telegramPosting.mode === 'instant'} className="mt-1" /><span><span className="font-semibold">Immediately when the teacher saves</span><br /><span className="text-xs text-ink/50">Parents see the class within seconds.</span></span></label>
+        <label className="flex items-start gap-3 rounded-lg border border-line p-3 text-sm"><input type="radio" name="mode" value="daily" defaultChecked={telegramPosting.mode === 'daily'} className="mt-1" /><span><span className="font-semibold">Automatically every day at</span> <input name="time" type="time" defaultValue={telegramPosting.time} className="rounded border border-line px-2 py-1 text-sm" /><br /><span className="text-xs text-ink/50">Like the old spreadsheet bot: the previous class day is posted at this time (academy timezone).</span></span></label>
+      </div>
+      <button disabled={busy} className="mt-3 rounded-lg bg-green-900 px-4 py-3 text-sm text-cream disabled:opacity-40">{busy ? 'Saving…' : 'Save posting time'}</button>
+    </form>
     <div className="grid gap-5 lg:grid-cols-2"><section className="space-y-3">{classGroups.map(g => <button key={g.id} disabled={busy} onClick={() => setEditing(g)} className="w-full rounded-xl border border-line bg-white p-4 text-left"><p className="font-semibold">{g.name}</p><p className="mt-1 text-sm text-ink/60">{g.teacher} · {g.program} · {g.enrolled}/{g.capacity} students</p><p className="text-xs text-ink/50">{g.schedule || 'Schedule not set'} · {g.telegramConnected ? 'Telegram attendance on' : 'No Telegram group'} · Click to edit</p></button>)}</section>
       <form key={editing?.id ?? 'new'} className="space-y-3 rounded-xl border border-line bg-white p-5" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void run(async () => { await saveGroup(editing?.id ?? null, { name: String(f.get('name')), teacher: String(f.get('teacher')), program: String(f.get('program')), schedule: String(f.get('schedule')), capacity: Number(f.get('capacity')), telegramChatId: String(f.get('telegramChatId')).trim() }); setEditing(null); }, 'Group saved. Linked students and applications updated.'); }}>
         <h2 className="font-bold">{editing ? 'Edit group' : 'Create group'}</h2><p className="text-xs text-ink/50">Changing the teacher moves the whole group to that teacher.</p>
@@ -22,7 +31,7 @@ export function GroupsPage() {
         <label className="block text-sm">Schedule<input name="schedule" className={field} defaultValue={editing?.schedule} maxLength={200} placeholder="Example: Mon/Wed 16:00–18:00" /></label>
         <label className="block text-sm">Capacity<input name="capacity" className={field} type="number" defaultValue={editing?.capacity ?? 30} required min={1} max={200} /></label>
         <label className="block text-sm">Telegram group chat ID (optional)<input name="telegramChatId" className={field} defaultValue={editing?.telegramChatId} inputMode="numeric" pattern="-?\d{5,20}" placeholder="Example: -1003406651107" /></label>
-        <p className="text-xs text-ink/50">When a teacher saves a class, the day's attendance and homework are posted to this Telegram group. Add the academy bot to the group first, and leave this empty to turn posting off.</p>
+        <p className="text-xs text-ink/50">The day's attendance and homework are posted to this Telegram group (immediately or at the daily time chosen above). Add the academy bot to the group first, and leave this empty to turn posting off.</p>
         {editing?.telegramConnected && <button type="button" disabled={busy} className="rounded-lg border border-line px-3 py-2 text-sm" onClick={() => void run(() => testGroupTelegram(editing.id), `Test message sent to the ${editing.name} Telegram group.`)}>Send test message</button>}
         <div className="flex gap-3"><button disabled={busy || !teachers.length} className="rounded-lg bg-green-900 px-4 py-3 text-cream disabled:opacity-40">{busy ? 'Saving…' : 'Save group'}</button><button type="button" disabled={busy} onClick={() => setEditing(null)}>New group</button></div>
       </form></div>

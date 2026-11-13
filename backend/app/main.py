@@ -19,6 +19,7 @@ from . import finance, telegram
 from .clock import academy_today, utc_now_iso
 from .database import audit, connect, init_db, rows_to_dicts
 from .schemas import (
+    TelegramSettingsWrite,
     ApplicationCreate, StaffEdit, StaffPasswordReset, GroupWrite, PlacementWrite,
     AssessmentRecordPatch,
     AttendanceRecordPatch,
@@ -519,6 +520,7 @@ def bootstrap(user=Depends(get_ready_user)):
             if user["role"] in {"IT Admin", "Registration"}:
                 group["telegramChatId"] = chats.get(group["id"], "")
         schedule = read_schedule(conn)
+        posting = telegram.read_posting_settings(conn)
         if user["role"] == "Teacher":
             # Teachers see whether a family is in good standing, never the ledger itself.
             ledger = {"invoices": [], "payments": [], "billingPlans": []}
@@ -538,6 +540,7 @@ def bootstrap(user=Depends(get_ready_user)):
         "tuitionRecords": tuition_records,
         "assessmentRecords": assessment_records,
         "weeklySchedule": schedule,
+        "telegramPosting": posting,
         "today": academy_today().isoformat(),
     }
 
@@ -1140,9 +1143,18 @@ def test_group_telegram(group_id: str, user=Depends(require_roles("IT Admin", "R
 def telegram_catch_up(user=Depends(require_roles("IT Admin", "Registration"))):
     """Link any unlinked real class chats and post recent class days that never reached Telegram."""
     linked = telegram.provision_group_chats()
-    posts = telegram.catch_up_missing_posts()
+    posts = telegram.catch_up_missing_posts(force=True)
     audit("telegram.catch_up", {"actorId": user["id"], "linked": len(linked), "posts": len(posts)})
     return {"ok": True, "linked": linked, "telegram": posts}
+
+
+@app.put("/api/telegram/settings")
+def save_telegram_settings(payload: TelegramSettingsWrite, user=Depends(require_roles("IT Admin", "Registration"))):
+    """Choose whether class days are posted the moment a teacher saves, or once a day at a set time."""
+    with connect() as conn:
+        settings = telegram.save_posting_settings(conn, payload.mode, payload.time)
+        finance.audit_in_transaction(conn, "telegram.settings", {"actorId": user["id"], **settings})
+    return {"ok": True, "telegramPosting": settings}
 
 
 def save_group(group_id, payload, user):

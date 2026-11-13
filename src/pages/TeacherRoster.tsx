@@ -82,6 +82,7 @@ export function TeacherRoster() {
     classGroups,
     saveClassSession,
     students,
+    telegramPosting,
     today,
     updateApplicationStatus,
     user,
@@ -205,11 +206,14 @@ Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} abs
       setSaved(true); setSessionState("saved");
       const failed = posts.filter((post) => post.status === "failed");
       const posted = posts.filter((post) => post.status === "sent" || post.status === "updated");
+      const scheduled = posts.find((post) => post.status === "scheduled");
       const telegramNote = failed.length
         ? ` The class is saved, but the Telegram post failed (${failed[0].detail ?? "Telegram error"}). Press Save class again to resend, or copy the summary below.`
         : posted.length
           ? posted.some((post) => post.status === "sent") ? " Attendance was posted to the Telegram group." : " The Telegram post was updated."
-          : "";
+          : scheduled
+            ? ` It will be posted to the Telegram group automatically at ${scheduled.detail ?? "the daily time"}.`
+            : "";
       setNotice(`${visibleRows.length} student records saved for ${sessionDate}.${telegramNote}`);
     } catch (error) {
       setNotice(`Class was not saved: ${error instanceof Error ? error.message : "connection error"} Your draft is kept; press Save class to retry.`);
@@ -378,7 +382,9 @@ Summary: ${metrics.present} present, ${metrics.late} late, ${metrics.absent} abs
             <h2 className="text-lg font-bold text-ink">Daily Telegram summary</h2>
             <p className="mt-0.5 text-sm text-ink/45">
               {activeGroup?.telegramConnected
-                ? "This group's attendance is posted to its Telegram group automatically when you save. You can also copy the summary."
+                ? telegramPosting.mode === "daily"
+                  ? `This group's attendance is posted to its Telegram group automatically every day at ${telegramPosting.time}. You can also copy the summary.`
+                  : "This group's attendance is posted to its Telegram group automatically when you save. You can also copy the summary."
                 : "No Telegram group is connected for this class yet. Copy the summary after saving and paste it into your group."}
             </p>
           </div>

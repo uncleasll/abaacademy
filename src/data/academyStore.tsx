@@ -31,8 +31,15 @@ export interface ClassSessionEntry {
 
 export interface TelegramPost {
   group: string;
-  status: "sent" | "updated" | "skipped" | "failed";
+  /** "scheduled" means posting is set to the daily run; detail then holds its time. */
+  status: "sent" | "updated" | "skipped" | "failed" | "scheduled";
   detail?: string;
+}
+
+/** When class days are posted to Telegram: the moment a teacher saves, or once a day at an academy-local time. */
+export interface TelegramPosting {
+  mode: "instant" | "daily";
+  time: string;
 }
 
 interface BootstrapData {
@@ -47,6 +54,7 @@ interface BootstrapData {
   attendanceRecords: AttendanceRecord[];
   assessmentRecords: AssessmentRecord[];
   weeklySchedule: ScheduleBlock[];
+  telegramPosting: TelegramPosting;
   /** Today's date in the academy's timezone, as reported by the server. */
   today: string;
 }
@@ -75,6 +83,7 @@ interface AcademyStore extends BootstrapData {
   saveBillingPlan: (payload: BillingPlan) => Promise<void>;
   voidPayment: (id: string, reason: string) => Promise<void>;
   saveSchedule: (blocks: ScheduleBlock[]) => Promise<void>;
+  saveTelegramPosting: (settings: TelegramPosting) => Promise<void>;
   loading: boolean;
   authLoading: boolean;
   apiOnline: boolean;
@@ -103,7 +112,7 @@ const USER_KEY = "aba_academy_user";
 const fallbackData: BootstrapData = {
   invoices: [], payments: [], billingPlans: [],
   students: [], applications: [], classGroups: [], staffUsers: [],
-  attendanceDates: [], attendanceRecords: [], assessmentRecords: [], weeklySchedule: [], today: "",
+  attendanceDates: [], attendanceRecords: [], assessmentRecords: [], weeklySchedule: [], telegramPosting: { mode: "instant", time: "09:30" }, today: "",
 };
 
 /** `status` 0 means the server could not be reached at all. */
@@ -349,6 +358,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     const saveBillingPlan: AcademyStore["saveBillingPlan"] = payload => done(mutate("/api/finance/billing-plan", payload, "PUT"));
     const voidPayment: AcademyStore["voidPayment"] = (id, reason) => done(mutate(`/api/finance/payments/${id}/void`, { reason }));
     const saveSchedule: AcademyStore["saveSchedule"] = blocks => done(mutate("/api/schedule", { blocks }, "PUT"));
+    const saveTelegramPosting: AcademyStore["saveTelegramPosting"] = settings => done(mutate("/api/telegram/settings", settings, "PUT"));
     const updateStudent: AcademyStore["updateStudent"] = (id, patch) => done(mutate(`/api/students/${id}`, patch, "PATCH"));
     const saveClassSession: AcademyStore["saveClassSession"] = async (date, entries) =>
       (await mutate<{ telegram?: TelegramPost[] }>("/api/class-session", { date, entries })).telegram ?? [];
@@ -418,7 +428,7 @@ export function AcademyProvider({ children }: { children: ReactNode }) {
     return {
       ...data,
       editStaff, resetStaffPassword, saveGroup, testGroupTelegram, transferStudent,
-      recordPayment, createInvoice, recordLedgerEntry, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, saveSchedule,
+      recordPayment, createInvoice, recordLedgerEntry, adjustInvoice, voidInvoice, saveBillingPlan, voidPayment, saveSchedule, saveTelegramPosting,
       loading,
       authLoading,
       apiOnline,

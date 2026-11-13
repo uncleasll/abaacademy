@@ -80,8 +80,10 @@ linked to those chats once: a group named with `G1`/`G2` takes that slot, otherw
 `<Teacher> — G2` group created. A chat saved or cleared on the Groups page is never overwritten, and
 a chat is never linked to two groups. Only `TELEGRAM_BOT_TOKEN` must be set for posting to work.
 
-When a teacher saves a class day it is posted to the group's chat immediately, and saving the day
-again edits the same post. Every 30 minutes the server also re-sends any class day from the last
+IT Admin and Registration choose on the Groups page when class days are posted (`PUT /api/telegram/settings`):
+**immediately** when a teacher saves (default), or **once a day** at an academy-local time such as 09:30,
+like the earlier spreadsheet bot. In daily mode a save only schedules the post; a day that was already
+posted is still edited right away. Saving a day again edits the same post. Every 30 minutes the server also re-sends any class day from the last
 three days that has attendance but no post (Telegram was down, or the chat was linked later).
 IT Admin and Registration can run the same check at once with `POST /api/telegram/catch-up`.
 
