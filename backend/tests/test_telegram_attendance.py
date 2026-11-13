@@ -96,8 +96,8 @@ class TelegramAttendanceTest(unittest.TestCase):
         # Present first, then late, then absent; absent students get the short line; names are escaped.
         self.assertLess(text.index('1. Yusuf'), text.index('2. Amina'))
         self.assertLess(text.index('2. Amina'), text.index('3. Zayd &lt;b&gt;'))
-        self.assertIn('Present | ★★★★★ | Last HW: Done', text)
-        self.assertIn('Late | ★★★☆☆ | Last HW: Partial', text)
+        self.assertIn('Present | ⭐⭐⭐⭐⭐ | Last HW: Done', text)
+        self.assertIn('Late | ⭐⭐⭐ | Last HW: Partial', text)
         self.assertIn('Next HW: <b><i>Page 5 &amp; 6</i></b>', text)
         self.assertIn('❌ Absent', text)
         self.assertIn('Surah Taha 20:114', text)

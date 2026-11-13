@@ -212,7 +212,7 @@ def build_attendance_message(day: str, rows: list[dict]) -> str:
             lines += ["  ❌ Absent", ""]
             continue
         stars = max(0, min(5, int(row["stars"] or 0)))
-        lines.append(f"  {row['attendance'].capitalize()} | {'★' * stars}{'☆' * (5 - stars)} | Last HW: {HOMEWORK_LABELS.get(row['hw'], '-')}")
+        lines.append(f"  {row['attendance'].capitalize()} | {'⭐' * stars or '-'} | Last HW: {HOMEWORK_LABELS.get(row['hw'], '-')}")
         if row["next_hw"]:
             lines.append(f"  Next HW: <b><i>{html.escape(row['next_hw'])}</i></b>")
         lines.append("")
