@@ -169,14 +169,19 @@ class TelegramAutoLinkTest(unittest.TestCase):
         self.assertEqual(by_name['Behzodjon — G2']['teacher'], 'Behzodjon')
         self.assertFalse(by_name['Adhamjon — General']['telegramConnected'])
 
-        # Staff changes win: a chat cleared by staff is not re-linked, and a restart changes nothing.
+        # A known chat id typed without its -100 prefix is repaired at startup; any other staff-entered chat is kept.
         group = by_name['Existing class']
         edit = {k: group[k] for k in ('name', 'teacher', 'program', 'schedule', 'capacity')}
-        self.assertEqual(self.call('/api/groups/' + group['id'], {**edit, 'telegramChatId': '-1009999999999'}, support, 'PUT')[0], 200)
+        self.assertEqual(self.call('/api/groups/' + group['id'], {**edit, 'telegramChatId': '-3406651107'}, support, 'PUT')[0], 200)
+        g2 = by_name['Behzodjon — G2']
+        g2_edit = {k: g2[k] for k in ('name', 'teacher', 'program', 'schedule', 'capacity')}
+        self.assertEqual(self.call('/api/groups/' + g2['id'], {**g2_edit, 'telegramChatId': '-1009999999999'}, support, 'PUT')[0], 200)
         self.process.terminate(); self.process.wait(timeout=10); self.start_server()
         groups = self.call('/api/bootstrap', token=support)[1]['classGroups']
-        self.assertEqual(next(g['telegramChatId'] for g in groups if g['name'] == 'Existing class'), '-1009999999999')
+        self.assertEqual(next(g['telegramChatId'] for g in groups if g['name'] == 'Existing class'), '-1003406651107')
+        self.assertEqual(next(g['telegramChatId'] for g in groups if g['name'] == 'Behzodjon — G2'), '-1009999999999')
         self.assertEqual(sum(1 for g in groups if g['teacher'] == 'Behzodjon'), 2)
+        self.assertEqual(self.call('/api/groups/' + group['id'], {**edit, 'telegramChatId': '-1009999999999'}, support, 'PUT')[0], 200)
 
         # A class day saved while Telegram was down is posted by the catch-up, once.
         base = dict(age=8, parentName='Parent', parentSurname='One', address='Address', teacher='Firuz', klass='Existing class', program='Hifz', intakeMode='enroll')

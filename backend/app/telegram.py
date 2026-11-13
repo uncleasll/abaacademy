@@ -106,11 +106,20 @@ def provision_group_chats() -> list[dict]:
     and a teacher who has fewer groups than chats gets the missing group created (editable on the Groups page).
     """
     linked: list[dict] = []
+    configured = configured_group_chats()
+    known = {chat for chats in configured.values() for chat in chats}
     with connect() as conn:
         if not conn.postgres:
             conn.execute("BEGIN IMMEDIATE")
+        # A supergroup id typed without its "-100" prefix (e.g. -3546618513) can never reach Telegram: restore the real id.
+        for row in conn.execute("SELECT t.group_id, t.chat_id, g.name FROM group_telegram t JOIN class_groups g ON g.id = t.group_id").fetchall():
+            digits = row["chat_id"].lstrip("-")
+            repaired = next((chat for chat in known if chat != row["chat_id"] and chat.lstrip("-").removeprefix("100") == digits.removeprefix("100")), None)
+            if repaired and not conn.execute("SELECT 1 FROM group_telegram WHERE chat_id=?", (repaired,)).fetchone():
+                conn.execute("UPDATE group_telegram SET chat_id=? WHERE group_id=?", (repaired, row["group_id"]))
+                linked.append({"group": row["name"], "chatId": repaired, "repairedFrom": row["chat_id"]})
         used = {row["chat_id"] for row in conn.execute("SELECT chat_id FROM group_telegram").fetchall()}
-        for teacher, chats in configured_group_chats().items():
+        for teacher, chats in configured.items():
             groups = [dict(row) for row in conn.execute("SELECT id, name FROM class_groups WHERE teacher=? ORDER BY name", (teacher,)).fetchall()]
             slots: dict[int, dict] = {}
             unnumbered = []
