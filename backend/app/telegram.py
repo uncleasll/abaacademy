@@ -47,11 +47,27 @@ def _call(method: str, payload: dict) -> dict:
     try:
         with urlopen(request, timeout=12) as response:
             result = json.loads(response.read())
-    except (HTTPError, URLError, TimeoutError) as exc:
+    except HTTPError as exc:
+        # Telegram answers 400/401/403 with a JSON description (wrong token, bot not in the group, chat not found).
+        try:
+            result = json.loads(exc.read())
+        except ValueError:
+            result = {}
+        if exc.code == 401:
+            raise HTTPException(502, "Telegram rejected the bot token: check TELEGRAM_BOT_TOKEN") from exc
+        raise HTTPException(502, _explain(result.get("description") or f"Telegram error {exc.code}")) from exc
+    except (URLError, TimeoutError) as exc:
         raise HTTPException(502, "Telegram is temporarily unavailable") from exc
     if not result.get("ok"):
-        raise HTTPException(502, result.get("description", "Telegram rejected the request"))
+        raise HTTPException(502, _explain(result.get("description", "Telegram rejected the request")))
     return result["result"]
+
+
+def _explain(description: str) -> str:
+    lowered = description.lower()
+    if "chat not found" in lowered or "kicked" in lowered or "not a member" in lowered or "forbidden" in lowered:
+        return f"{description}. Add the academy bot to this Telegram group (as admin in a supergroup) or fix the chat ID"
+    return description
 
 
 def init_telegram() -> None:
